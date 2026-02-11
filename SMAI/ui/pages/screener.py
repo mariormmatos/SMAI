@@ -1,12 +1,15 @@
 ﻿from __future__ import annotations
 
+import io
+import re
 from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from SMAI.core.data_yf import yf_info
+from SMAI.core.dcf import DcfInputs, run_dcf
+from SMAI.core.data_yf import statement_to_timeseries, yf_info, yf_statements
 from SMAI.core.formatting import is_bad, safe_float
 from SMAI.core.scoring import compute_snapshot_ratios, scorecard
 from SMAI.core.sentiment import fetch_reddit_search, fetch_stocktwits, sentiment_summary
@@ -27,23 +30,110 @@ def _load_universe_from_upload(uploaded) -> List[str]:
     if uploaded is None:
         return []
     try:
-        dfu = pd.read_csv(uploaded)
-        cols = [c for c in dfu.columns if c.lower() in {"ticker", "symbol"}]
-        if not cols:
-            return []
-        return [str(x).strip().upper() for x in dfu[cols[0]].dropna().tolist()]
+        raw = uploaded.getvalue()
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1", errors="ignore")
     except Exception:
         return []
+
+    if not text.strip():
+        return []
+
+    def _clean_tokens(values: List[str]) -> List[str]:
+        out: List[str] = []
+        seen = set()
+        for val in values:
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                continue
+            for token in re.split(r"[,;\n\r\t]+", str(val)):
+                tk = token.strip().strip('"').strip("'").upper()
+                if not tk or tk in {"NAN", "NONE", "NULL"}:
+                    continue
+                if tk not in seen:
+                    seen.add(tk)
+                    out.append(tk)
+        return out
+
+    def _parse_df(dfu: pd.DataFrame) -> List[str]:
+        if dfu.empty and dfu.columns.empty:
+            return []
+        cols = [c for c in dfu.columns if str(c).strip().lower() in {"ticker", "symbol", "tickers", "symbols"}]
+        if cols:
+            return _clean_tokens(dfu[cols[0]].tolist())
+        if dfu.shape[1] == 1:
+            return _clean_tokens(dfu.iloc[:, 0].tolist())
+        return _clean_tokens(dfu.values.ravel().tolist())
+
+    read_attempts = [
+        {"sep": None, "engine": "python"},
+        {"sep": ";"},
+        {"sep": ","},
+        {"sep": None, "engine": "python", "header": None},
+        {"sep": ";", "header": None},
+        {"sep": ",", "header": None},
+    ]
+    for opts in read_attempts:
+        try:
+            tickers = _parse_df(pd.read_csv(io.StringIO(text), **opts))
+            if tickers:
+                return tickers
+        except Exception:
+            continue
+
+    return _clean_tokens([text])
 
 
 def _valuation_screen_row(ticker: str) -> Dict:
     info = yf_info(ticker)
     ratios = compute_snapshot_ratios(info)
     mcap_i = safe_float(info.get("marketCap"))
+    last_price = safe_float(info.get("currentPrice"))
+    if is_bad(last_price):
+        last_price = safe_float(info.get("regularMarketPrice"))
+
+    fcf = safe_float(info.get("freeCashflow"))
+    if is_bad(fcf):
+        cf_a = yf_statements(ticker).get("cashflow", pd.DataFrame())
+        cf_ts = statement_to_timeseries(cf_a, ["Total Cash From Operating Activities", "Capital Expenditures"])
+        if (
+            not cf_ts.empty
+            and "Total Cash From Operating Activities" in cf_ts.columns
+            and "Capital Expenditures" in cf_ts.columns
+        ):
+            fcf_series = (cf_ts["Total Cash From Operating Activities"] + cf_ts["Capital Expenditures"]).dropna()
+            if not fcf_series.empty:
+                fcf = safe_float(fcf_series.tail(1).iloc[0])
+
+    cash = safe_float(info.get("totalCash"))
+    debt = safe_float(info.get("totalDebt"))
+    shares = safe_float(info.get("sharesOutstanding"))
+    net_debt = (debt - cash) if (not is_bad(debt) and not is_bad(cash)) else 0.0
+    intrinsic = np.nan
+    if not is_bad(fcf) and fcf > 0 and not is_bad(shares) and shares > 0:
+        dcf_base = DcfInputs(
+            years=10,
+            fcf_growth=0.08,
+            discount_rate=0.10,
+            terminal_growth=0.025,
+            net_debt=float(net_debt),
+            shares_outstanding=float(shares),
+            starting_fcf=float(fcf),
+        )
+        intrinsic = safe_float(run_dcf(dcf_base).get("intrinsic_per_share"))
+        if not is_bad(intrinsic) and intrinsic <= 0:
+            intrinsic = np.nan
+
+    upside = np.nan
+    if not is_bad(intrinsic) and not is_bad(last_price) and float(last_price) > 0:
+        upside = (float(intrinsic) / float(last_price) - 1.0) * 100.0
+
     score_i, _ = scorecard(ratios)
     return {
         "Ticker": ticker,
         "Name": info.get("shortName", ""),
+        "Price": np.nan if is_bad(last_price) else float(last_price),
+        "Intrinsic Value": np.nan if is_bad(intrinsic) else float(intrinsic),
         "MarketCap($B)": (mcap_i / 1e9) if not is_bad(mcap_i) else np.nan,
         "P/E": ratios.get("Trailing P/E", np.nan),
         "P/B": ratios.get("P/B", np.nan),
@@ -52,6 +142,7 @@ def _valuation_screen_row(ticker: str) -> Dict:
         "ROE%": (ratios.get("ROE", np.nan) * 100.0) if not is_bad(ratios.get("ROE", np.nan)) else np.nan,
         "Debt/Equity": ratios.get("Debt/Equity", np.nan),
         "Scorecard": score_i,
+        "Upside %": np.nan if is_bad(upside) else float(upside),
     }
 
 
@@ -102,7 +193,16 @@ def render_screener(
 
     if uploaded is not None:
         universe = _load_universe_from_upload(uploaded)
-        source_lbl = "CSV"
+        if universe:
+            source_lbl = "CSV"
+        else:
+            st.warning("Nao consegui ler tickers validos do CSV. A usar o universo selecionado na sidebar.")
+            if screener_universe_choice != "Custom":
+                universe = _preset_universe(screener_universe_choice)
+                source_lbl = screener_universe_choice
+            else:
+                universe = [t.strip().upper() for t in custom_universe.split(",") if t.strip()]
+                source_lbl = "Custom"
     else:
         if screener_universe_choice != "Custom":
             universe = _preset_universe(screener_universe_choice)
@@ -136,6 +236,26 @@ def render_screener(
         st.stop()
 
     df_sorted = df.sort_values(["Passes", "Scorecard", "MarketCap($B)"], ascending=[False, False, False])
+    ordered_cols = [
+        "Ticker",
+        "Name",
+        "MarketCap($B)",
+        "P/E",
+        "P/B",
+        "EV/EBITDA",
+        "DivYield%",
+        "ROE%",
+        "Debt/Equity",
+        "Scorecard",
+        "Passes",
+        "Price",
+        "Intrinsic Value",
+        "Upside %",
+    ]
+    df_sorted = df_sorted[
+        [c for c in ordered_cols if c in df_sorted.columns]
+        + [c for c in df_sorted.columns if c not in ordered_cols]
+    ]
 
     st.markdown("### Results")
     st.dataframe(df_sorted, use_container_width=True, hide_index=True)

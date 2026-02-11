@@ -7,19 +7,53 @@ import numpy as np
 from .formatting import is_bad, safe_float
 
 
+def _normalize_fraction_metric(value: float, threshold: float = 1.0) -> float:
+    """
+    Yahoo fields are usually fractions (0.025 == 2.5%), but sometimes arrive in percent units (2.5).
+    """
+    v = safe_float(value)
+    if is_bad(v):
+        return np.nan
+    if abs(v) > threshold and abs(v) <= 10000:
+        return v / 100.0
+    return v
+
+
+def _ev_to_ebitda(info: Dict) -> float:
+    raw_multiple = safe_float(info.get("enterpriseToEbitda"))
+    ev = safe_float(info.get("enterpriseValue"))
+    ebitda = safe_float(info.get("ebitda"))
+
+    calc_multiple = np.nan
+    if not is_bad(ev) and not is_bad(ebitda) and ebitda != 0:
+        calc_multiple = ev / ebitda
+
+    if is_bad(raw_multiple):
+        return calc_multiple
+    if is_bad(calc_multiple):
+        return raw_multiple
+
+    if raw_multiple > 0 and calc_multiple > 0:
+        rel_diff = abs(raw_multiple - calc_multiple) / max(abs(raw_multiple), abs(calc_multiple))
+        if rel_diff > 0.35:
+            return calc_multiple
+
+    return raw_multiple
+
+
 def compute_snapshot_ratios(info: Dict) -> Dict[str, float]:
     return {
         "Trailing P/E": safe_float(info.get("trailingPE")),
         "Forward P/E": safe_float(info.get("forwardPE")),
         "P/B": safe_float(info.get("priceToBook")),
         "P/S (TTM)": safe_float(info.get("priceToSalesTrailing12Months")),
-        "EV/EBITDA": safe_float(info.get("enterpriseToEbitda")),
-        "ROE": safe_float(info.get("returnOnEquity")),
-        "ROA": safe_float(info.get("returnOnAssets")),
-        "Profit Margin": safe_float(info.get("profitMargins")),
-        "Operating Margin": safe_float(info.get("operatingMargins")),
-        "Dividend Yield": safe_float(info.get("dividendYield")),
-        "Payout Ratio": safe_float(info.get("payoutRatio")),
+        "EV/EBITDA": _ev_to_ebitda(info),
+        "ROE": _normalize_fraction_metric(info.get("returnOnEquity"), threshold=2.0),
+        "ROA": _normalize_fraction_metric(info.get("returnOnAssets"), threshold=2.0),
+        "Profit Margin": _normalize_fraction_metric(info.get("profitMargins"), threshold=2.0),
+        "Operating Margin": _normalize_fraction_metric(info.get("operatingMargins"), threshold=2.0),
+        "Dividend Yield": _normalize_fraction_metric(info.get("dividendYield"), threshold=1.0),
+        "Payout Ratio": _normalize_fraction_metric(info.get("payoutRatio"), threshold=2.0),
         "Beta": safe_float(info.get("beta")),
         "Debt/Equity": safe_float(info.get("debtToEquity")),
     }
