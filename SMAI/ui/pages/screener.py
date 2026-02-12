@@ -133,7 +133,6 @@ def _valuation_screen_row(ticker: str) -> Dict:
         "Ticker": ticker,
         "Name": info.get("shortName", ""),
         "Price": np.nan if is_bad(last_price) else float(last_price),
-        "Intrinsic Value": np.nan if is_bad(intrinsic) else float(intrinsic),
         "MarketCap($B)": (mcap_i / 1e9) if not is_bad(mcap_i) else np.nan,
         "P/E": ratios.get("Trailing P/E", np.nan),
         "P/B": ratios.get("P/B", np.nan),
@@ -235,6 +234,7 @@ def render_screener(
         st.markdown("</div>", unsafe_allow_html=True)
         st.stop()
 
+    df = df.drop(columns=["Intrinsic Value"], errors="ignore")
     df_sorted = df.sort_values(["Passes", "Scorecard", "MarketCap($B)"], ascending=[False, False, False])
     ordered_cols = [
         "Ticker",
@@ -249,7 +249,6 @@ def render_screener(
         "Scorecard",
         "Passes",
         "Price",
-        "Intrinsic Value",
         "Upside %",
     ]
     df_sorted = df_sorted[
@@ -258,7 +257,11 @@ def render_screener(
     ]
 
     st.markdown("### Results")
-    st.dataframe(df_sorted, use_container_width=True, hide_index=True)
+    df_display = df_sorted.copy()
+    num_cols = df_display.select_dtypes(include=["number"]).columns
+    if len(num_cols) > 0:
+        df_display[num_cols] = df_display[num_cols].round(1)
+    st.dataframe(df_display, use_container_width=True, hide_index=True)
 
     st.markdown("### Top picks — with sentiment quick check")
     top = df_sorted[df_sorted["Passes"] == True].head(8)
