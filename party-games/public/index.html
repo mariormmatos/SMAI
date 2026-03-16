@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Party Games</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#7c3aed">
+
+  <!-- iPhone PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Party Games">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: HOME
+  ══════════════════════════════════════════════ -->
+  <div id="screen-home" class="screen active">
+    <div class="home-hero">
+      <div class="app-logo">🎮</div>
+      <h1 class="app-title">Party Games</h1>
+      <p class="app-subtitle">Jogos divertidos para jogar com os amigos</p>
+    </div>
+    <div class="home-buttons">
+      <button class="btn btn-primary btn-xl" id="btn-host">
+        <span class="btn-icon">👑</span>
+        <span>Sou Anfitrião</span>
+      </button>
+      <button class="btn btn-secondary btn-xl" id="btn-player">
+        <span class="btn-icon">📱</span>
+        <span>Entrar numa Sessão</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: GAME SELECT (host)
+  ══════════════════════════════════════════════ -->
+  <div id="screen-game-select" class="screen">
+    <div class="screen-header">
+      <button class="btn-back" id="back-from-game-select">←</button>
+      <h2>Escolhe um Jogo</h2>
+    </div>
+    <div class="game-list" id="game-list">
+      <div class="game-card" data-game="quiz">
+        <div class="game-icon">⚡</div>
+        <div class="game-info">
+          <div class="game-name">Quiz Rápido</div>
+          <div class="game-desc">Competição · Responde mais rápido que os outros</div>
+        </div>
+      </div>
+      <div class="game-card" data-game="bluff">
+        <div class="game-icon">🎭</div>
+        <div class="game-info">
+          <div class="game-name">Verdade ou Mentira</div>
+          <div class="game-desc">Bluff · Engana os outros com as tuas respostas</div>
+        </div>
+      </div>
+      <div class="game-card" data-game="creative">
+        <div class="game-icon">💡</div>
+        <div class="game-info">
+          <div class="game-name">Artista Relâmpago</div>
+          <div class="game-desc">Criatividade · Resposta mais criativa ganha</div>
+        </div>
+      </div>
+      <div class="game-card" data-game="mission">
+        <div class="game-icon">🔥</div>
+        <div class="game-info">
+          <div class="game-name">Missão ou Castigo</div>
+          <div class="game-desc">Tarefas · Cumpre a missão ou sofre o castigo</div>
+        </div>
+      </div>
+      <div class="game-card" data-game="consensus">
+        <div class="game-icon">🧠</div>
+        <div class="game-info">
+          <div class="game-name">Mente Coletiva</div>
+          <div class="game-desc">Consenso · A resposta mais comum ganha pontos</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: LOBBY (host)
+  ══════════════════════════════════════════════ -->
+  <div id="screen-lobby" class="screen">
+    <div class="screen-header">
+      <h2 id="lobby-game-name">Quiz Rápido</h2>
+    </div>
+    <div class="lobby-content">
+      <p class="lobby-hint">Mostra este QR code aos jogadores</p>
+      <div id="qr-container" class="qr-box"></div>
+      <div class="session-code">
+        Código: <span id="lobby-session-id" class="code-text">------</span>
+      </div>
+      <div class="lobby-players">
+        <div class="players-header">
+          Jogadores (<span id="player-count">0</span>)
+        </div>
+        <ul id="player-list" class="player-list"></ul>
+      </div>
+      <button class="btn btn-primary btn-xl" id="btn-start" disabled>
+        Iniciar Jogo
+      </button>
+      <p class="start-hint" id="start-hint">Precisas de pelo menos 2 jogadores</p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: JOIN (player)
+  ══════════════════════════════════════════════ -->
+  <div id="screen-join" class="screen">
+    <div class="screen-header">
+      <button class="btn-back" id="back-from-join">←</button>
+      <h2>Entrar na Sessão</h2>
+    </div>
+    <div class="join-form">
+      <div class="form-group">
+        <label class="form-label">Código da Sessão</label>
+        <input type="text" id="input-session-id" class="form-input" placeholder="Ex: ABC123"
+          maxlength="6" autocomplete="off" autocapitalize="characters">
+      </div>
+      <div class="form-group">
+        <label class="form-label">O teu nome</label>
+        <input type="text" id="input-player-name" class="form-input" placeholder="Ex: João"
+          maxlength="20" autocomplete="off">
+      </div>
+      <div class="form-error" id="join-error"></div>
+      <button class="btn btn-primary btn-xl" id="btn-join">Entrar</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: WAITING (player)
+  ══════════════════════════════════════════════ -->
+  <div id="screen-waiting" class="screen">
+    <div class="waiting-content">
+      <div class="waiting-icon">⏳</div>
+      <h2>Aguarda...</h2>
+      <p class="waiting-text">O anfitrião está a preparar o jogo</p>
+      <div class="waiting-game-badge" id="waiting-game-badge"></div>
+      <div class="waiting-players" id="waiting-players"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: ROUND (game area, injected by JS)
+  ══════════════════════════════════════════════ -->
+  <div id="screen-round" class="screen">
+    <div class="round-header">
+      <div class="round-number" id="round-number">Ronda 1</div>
+      <div class="round-timer" id="round-timer"></div>
+    </div>
+    <div id="round-content" class="round-content">
+      <!-- injected by game-specific JS -->
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: ROUND RESULT
+  ══════════════════════════════════════════════ -->
+  <div id="screen-round-result" class="screen">
+    <div class="result-header">
+      <div class="result-title" id="result-title">Resultado</div>
+    </div>
+    <div id="result-content" class="result-content">
+      <!-- injected by game JS -->
+    </div>
+    <div class="scoreboard">
+      <div class="scoreboard-title">Classificação</div>
+      <ul id="scoreboard-list" class="scoreboard-list"></ul>
+    </div>
+    <!-- host only -->
+    <div id="host-next-btn" class="host-controls" style="display:none">
+      <button class="btn btn-primary btn-xl" id="btn-next-round">Próxima Ronda →</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: FINAL PODIUM
+  ══════════════════════════════════════════════ -->
+  <div id="screen-final" class="screen">
+    <div class="podium-header">
+      <div class="podium-trophy">🏆</div>
+      <h2>Resultado Final</h2>
+    </div>
+    <div id="podium-top3" class="podium-top3"></div>
+    <ul id="final-ranking" class="final-ranking"></ul>
+    <button class="btn btn-secondary btn-xl" id="btn-play-again">Jogar Novamente</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SCREEN: HOST ROUND CONTROL (shown on host during active round)
+  ══════════════════════════════════════════════ -->
+  <div id="screen-host-round" class="screen">
+    <div class="screen-header">
+      <h2 id="host-round-title">Ronda em curso</h2>
+    </div>
+    <div id="host-round-content" class="host-round-content">
+      <!-- injected by game JS -->
+    </div>
+    <div class="host-controls">
+      <div class="answers-progress" id="answers-progress"></div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="/js/socket.js"></script>
+  <script src="/js/games/quiz.js"></script>
+  <script src="/js/games/bluff.js"></script>
+  <script src="/js/games/creative.js"></script>
+  <script src="/js/games/mission.js"></script>
+  <script src="/js/games/consensus.js"></script>
+  <script src="/js/qr.js"></script>
+  <script src="/js/host.js"></script>
+  <script src="/js/player.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
+</body>
+</html>
