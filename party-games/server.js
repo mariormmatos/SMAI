@@ -12,20 +12,28 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 3000;
 
-// Auto-detect local network IP
-function getLocalIP() {
+// Public base URL: Railway sets RAILWAY_PUBLIC_DOMAIN automatically.
+// Falls back to local network IP for home WiFi use.
+function getBaseUrl() {
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) {
+    return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  }
+  if (process.env.BASE_URL) {
+    return process.env.BASE_URL;
+  }
+  // Local WiFi fallback
   const ifaces = os.networkInterfaces();
   for (const name of Object.keys(ifaces)) {
     for (const iface of ifaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
+        return `http://${iface.address}:${PORT}`;
       }
     }
   }
-  return 'localhost';
+  return `http://localhost:${PORT}`;
 }
 
-const LOCAL_IP = getLocalIP();
+const BASE_URL = getBaseUrl();
 
 // In-memory sessions: sessionId → session object
 const sessions = new Map();
@@ -47,7 +55,7 @@ io.on('connection', (socket) => {
   // HOST: create a new game session
   socket.on('create_session', ({ game }) => {
     const sessionId = generateSessionId();
-    const joinUrl = `http://${LOCAL_IP}:${PORT}/join?s=${sessionId}`;
+    const joinUrl = `${BASE_URL}/join?s=${sessionId}`;
     const session = {
       sessionId,
       hostSocketId: socket.id,
@@ -221,6 +229,6 @@ function findSessionByPlayer(socketId) {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🎮 Party Games server running!`);
   console.log(`   Local:    http://localhost:${PORT}`);
-  console.log(`   Network:  http://${LOCAL_IP}:${PORT}`);
-  console.log(`\n   Share the Network URL with your friends on the same WiFi.\n`);
+  console.log(`   Public:   ${BASE_URL}`);
+  console.log(`\n   Share the Public URL (or QR code) with your friends.\n`);
 });
