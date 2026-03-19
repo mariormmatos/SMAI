@@ -120,6 +120,8 @@ def stream():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+    port_env = os.environ.get("PORT")
+    print(f"PORT env var = {port_env!r}", flush=True)
+    port = int(port_env) if port_env else 8080
     print(f"Starting on port {port}", flush=True)
     app.run(host="0.0.0.0", port=port, debug=False)
