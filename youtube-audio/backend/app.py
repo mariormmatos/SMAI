@@ -67,7 +67,7 @@ def get_audio_info(url: str) -> dict:
             return entry
 
     ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
+        "format": "bestaudio/best",
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
