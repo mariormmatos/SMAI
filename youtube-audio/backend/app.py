@@ -115,6 +115,7 @@ def formats():
         "quiet": False,
         "no_warnings": False,
         "extract_flat": False,
+        "listformats": False,
         "extractor_args": {"youtube": {"player_client": ["ios"]}},
     }
     # Test without cookies to diagnose if cookies cause bot detection
@@ -133,15 +134,19 @@ def formats():
             pass
 
     try:
+        # No format selector — extract raw info to see all available formats
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(url, download=False, process=False)
+            raw_fmts = info.get("formats") or []
             fmts = [
                 {"id": f.get("format_id"), "ext": f.get("ext"),
                  "acodec": f.get("acodec"), "vcodec": f.get("vcodec"),
-                 "abr": f.get("abr"), "note": f.get("format_note")}
-                for f in info.get("formats", [])
+                 "abr": f.get("abr"), "note": f.get("format_note"),
+                 "url_ok": bool(f.get("url"))}
+                for f in raw_fmts
             ]
-        return jsonify({"cookie_file": cookies_path, "cookie_preview": cookie_preview, "formats": fmts})
+        return jsonify({"cookie_file": cookies_path, "cookie_preview": cookie_preview,
+                        "title": info.get("title"), "format_count": len(fmts), "formats": fmts})
     except Exception as e:
         return jsonify({"error": str(e), "cookie_file": cookies_path, "cookie_preview": cookie_preview}), 500
 
