@@ -134,9 +134,8 @@ def formats():
             pass
 
     try:
-        # No format selector — extract raw info to see all available formats
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False, process=False)
+            info = ydl.extract_info(url, download=False)
             raw_fmts = info.get("formats") or []
             fmts = [
                 {"id": f.get("format_id"), "ext": f.get("ext"),
@@ -145,7 +144,7 @@ def formats():
                  "url_ok": bool(f.get("url"))}
                 for f in raw_fmts
             ]
-        return jsonify({"cookie_file": cookies_path, "cookie_preview": cookie_preview,
+        return jsonify({"cookie_file": cookies_path,
                         "title": info.get("title"), "format_count": len(fmts), "formats": fmts})
     except Exception as e:
         return jsonify({"error": str(e), "cookie_file": cookies_path, "cookie_preview": cookie_preview}), 500
