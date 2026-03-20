@@ -27,12 +27,34 @@ def sanitize_url(url: str) -> str:
 
 
 def _cookies_file():
-    """Write YOUTUBE_COOKIES env var to a temp file and return its path, or None."""
-    cookies_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
-    if not cookies_content:
+    """Build a Netscape cookies.txt from env vars and return its path, or None.
+
+    Accepts either:
+    - YOUTUBE_COOKIE_HEADER: raw Cookie: header value copied from DevTools
+      e.g.  SID=xxx; HSID=yyy; SSID=zzz; ...
+    - YOUTUBE_COOKIES: already-formatted Netscape cookies.txt content (legacy)
+    """
+    header = os.environ.get("YOUTUBE_COOKIE_HEADER", "").strip()
+    if header:
+        lines = ["# Netscape HTTP Cookie File"]
+        for pair in header.split(";"):
+            pair = pair.strip()
+            if "=" not in pair:
+                continue
+            name, _, value = pair.partition("=")
+            # Use far-future expiry; yt-dlp only needs name+value to authenticate
+            lines.append(
+                f".youtube.com\tTRUE\t/\tFALSE\t9999999999\t{name.strip()}\t{value.strip()}"
+            )
+        content = "\n".join(lines) + "\n"
+    else:
+        content = os.environ.get("YOUTUBE_COOKIES", "").strip()
+
+    if not content:
         return None
+
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-    tmp.write(cookies_content)
+    tmp.write(content)
     tmp.close()
     return tmp.name
 
