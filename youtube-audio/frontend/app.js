@@ -232,6 +232,60 @@ audio.addEventListener("ended", () => {
   if (currentIndex < queue.length - 1) playIndex(currentIndex + 1);
 });
 
+// ─── Stall / Error recovery ───────────────────────────────────────────────────
+let _stallTimer = null;
+let _stallCount = 0;
+
+function scheduleReconnect() {
+  // Don't reconnect if paused intentionally or nothing is playing
+  if (currentIndex < 0 || audio.paused) return;
+  if (_stallTimer) return; // already scheduled
+
+  _stallTimer = setTimeout(() => {
+    _stallTimer = null;
+    if (currentIndex < 0 || audio.paused) return;
+
+    const savedTime = audio.currentTime;
+    _stallCount++;
+
+    audio.src = `${BACKEND_URL}/stream?url=${encodeURIComponent(queue[currentIndex].url)}`;
+    audio.load();
+
+    // Seek to saved position once enough data is buffered
+    const onCanPlay = () => {
+      audio.removeEventListener("canplay", onCanPlay);
+      if (savedTime > 0 && isFinite(audio.duration)) {
+        audio.currentTime = savedTime;
+      }
+      audio.play().catch(() => {});
+      _stallCount = 0;
+    };
+    audio.addEventListener("canplay", onCanPlay);
+  }, 3000);
+}
+
+audio.addEventListener("stalled", scheduleReconnect);
+audio.addEventListener("waiting", () => {
+  // Only trigger reconnect if waiting persists (>8s) — normal buffering is fine
+  if (_stallTimer) return;
+  _stallTimer = setTimeout(() => {
+    _stallTimer = null;
+    scheduleReconnect();
+  }, 8000);
+});
+audio.addEventListener("playing", () => {
+  // Clear any pending reconnect timers when playback resumes normally
+  if (_stallTimer) {
+    clearTimeout(_stallTimer);
+    _stallTimer = null;
+  }
+  _stallCount = 0;
+});
+audio.addEventListener("error", (e) => {
+  // Only auto-reconnect up to 3 times to avoid infinite loops
+  if (_stallCount < 3) scheduleReconnect();
+});
+
 progressBar.addEventListener("mousedown", () => { isSeeking = true; });
 progressBar.addEventListener("touchstart", () => { isSeeking = true; });
 progressBar.addEventListener("input", () => {

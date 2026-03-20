@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import requests
 import yt_dlp
 from flask import Flask, request, jsonify, Response, stream_with_context
@@ -12,6 +13,10 @@ YT_URL_RE = re.compile(
     r"^(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/)[\w-]{11}"
 )
 
+# Cache yt-dlp results for 5 minutes to avoid double extraction on /info + /stream
+_info_cache: dict = {}
+CACHE_TTL = 300  # seconds
+
 
 def sanitize_url(url: str) -> str:
     url = url.strip()
@@ -21,6 +26,12 @@ def sanitize_url(url: str) -> str:
 
 
 def get_audio_info(url: str) -> dict:
+    now = time.time()
+    if url in _info_cache:
+        entry, ts = _info_cache[url]
+        if now - ts < CACHE_TTL:
+            return entry
+
     ydl_opts = {
         "format": "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
         "quiet": True,
@@ -29,7 +40,7 @@ def get_audio_info(url: str) -> dict:
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
-        return {
+        result = {
             "title": info.get("title", ""),
             "thumbnail": info.get("thumbnail", ""),
             "duration": info.get("duration", 0),
@@ -37,6 +48,8 @@ def get_audio_info(url: str) -> dict:
             "stream_url": info["url"],
             "content_type": info.get("ext", "m4a"),
         }
+    _info_cache[url] = (result, now)
+    return result
 
 
 @app.route("/health")
@@ -93,7 +106,8 @@ def stream():
     if range_header:
         headers["Range"] = range_header
 
-    upstream = requests.get(stream_url, headers=headers, stream=True, timeout=30)
+    # connect_timeout=10s, read_timeout=None (stream can stay open indefinitely)
+    upstream = requests.get(stream_url, headers=headers, stream=True, timeout=(10, None))
 
     response_headers = {
         "Content-Type": mime,
