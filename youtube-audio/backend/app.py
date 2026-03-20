@@ -1,5 +1,6 @@
 import os
 import re
+import tempfile
 import time
 import requests
 import yt_dlp
@@ -25,6 +26,17 @@ def sanitize_url(url: str) -> str:
     return url
 
 
+def _cookies_file():
+    """Write YOUTUBE_COOKIES env var to a temp file and return its path, or None."""
+    cookies_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    if not cookies_content:
+        return None
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    tmp.write(cookies_content)
+    tmp.close()
+    return tmp.name
+
+
 def get_audio_info(url: str) -> dict:
     now = time.time()
     if url in _info_cache:
@@ -38,6 +50,10 @@ def get_audio_info(url: str) -> dict:
         "no_warnings": True,
         "extract_flat": False,
     }
+    cookies_path = _cookies_file()
+    if cookies_path:
+        ydl_opts["cookiefile"] = cookies_path
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         result = {
