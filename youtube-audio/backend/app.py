@@ -121,6 +121,15 @@ def formats():
     if cookies_path:
         ydl_opts["cookiefile"] = cookies_path
 
+    # Show first 500 chars of cookie file for debugging
+    cookie_preview = None
+    if cookies_path:
+        try:
+            with open(cookies_path) as f:
+                cookie_preview = f.read(500)
+        except Exception:
+            pass
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -130,9 +139,9 @@ def formats():
                  "abr": f.get("abr"), "note": f.get("format_note")}
                 for f in info.get("formats", [])
             ]
-        return jsonify({"cookie_file": cookies_path, "formats": fmts})
+        return jsonify({"cookie_file": cookies_path, "cookie_preview": cookie_preview, "formats": fmts})
     except Exception as e:
-        return jsonify({"error": str(e), "cookie_file": cookies_path}), 500
+        return jsonify({"error": str(e), "cookie_file": cookies_path, "cookie_preview": cookie_preview}), 500
 
 
 @app.route("/info")
