@@ -72,12 +72,11 @@ def get_audio_info(url: str) -> dict:
             return entry
 
     ydl_opts = {
-        "format": "best[ext=mp4]/best",
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
-        # ios-only avoids bot-detection; adding web/tv_embedded triggers bot checks
-        "extractor_args": {"youtube": {"player_client": ["ios"]}},
+        "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
     }
     cookies_path = _cookies_file()
     if cookies_path:
@@ -115,8 +114,7 @@ def formats():
         "quiet": False,
         "no_warnings": False,
         "extract_flat": False,
-        "listformats": False,
-        "extractor_args": {"youtube": {"player_client": ["ios"]}},
+        "extractor_args": {"youtube": {"player_client": ["android_vr"]}},
     }
     # Test without cookies to diagnose if cookies cause bot detection
     no_cookie = request.args.get("nocookie", "0") == "1"
