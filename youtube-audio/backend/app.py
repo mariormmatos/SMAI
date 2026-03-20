@@ -76,8 +76,6 @@ def get_audio_info(url: str) -> dict:
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
-        # Use iOS client — avoids bot-detection on server IPs without cookies
-        "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
     }
     cookies_path = _cookies_file()
     if cookies_path:
