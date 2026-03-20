@@ -72,12 +72,12 @@ def get_audio_info(url: str) -> dict:
             return entry
 
     ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio/best",
+        "format": "best[ext=mp4]/best",
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
-        # tv_embedded bypasses bot-detection on cloud IPs and returns full format list
-        "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios"]}},
+        # ios-only avoids bot-detection; adding web/tv_embedded triggers bot checks
+        "extractor_args": {"youtube": {"player_client": ["ios"]}},
     }
     cookies_path = _cookies_file()
     if cookies_path:
