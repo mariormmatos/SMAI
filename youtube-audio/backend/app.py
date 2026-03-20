@@ -115,9 +115,11 @@ def formats():
         "quiet": False,
         "no_warnings": False,
         "extract_flat": False,
-        "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios"]}},
+        "extractor_args": {"youtube": {"player_client": ["ios"]}},
     }
-    cookies_path = _cookies_file()
+    # Test without cookies to diagnose if cookies cause bot detection
+    no_cookie = request.args.get("nocookie", "0") == "1"
+    cookies_path = _cookies_file() if not no_cookie else None
     if cookies_path:
         ydl_opts["cookiefile"] = cookies_path
 
