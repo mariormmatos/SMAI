@@ -102,6 +102,39 @@ def health():
     return jsonify({"status": "ok"})
 
 
+@app.route("/formats")
+def formats():
+    """Debug endpoint: list all available formats for a video."""
+    url = request.args.get("url", "")
+    try:
+        url = sanitize_url(url)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+    ydl_opts = {
+        "quiet": False,
+        "no_warnings": False,
+        "extract_flat": False,
+        "extractor_args": {"youtube": {"player_client": ["tv_embedded", "ios"]}},
+    }
+    cookies_path = _cookies_file()
+    if cookies_path:
+        ydl_opts["cookiefile"] = cookies_path
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            fmts = [
+                {"id": f.get("format_id"), "ext": f.get("ext"),
+                 "acodec": f.get("acodec"), "vcodec": f.get("vcodec"),
+                 "abr": f.get("abr"), "note": f.get("format_note")}
+                for f in info.get("formats", [])
+            ]
+        return jsonify({"cookie_file": cookies_path, "formats": fmts})
+    except Exception as e:
+        return jsonify({"error": str(e), "cookie_file": cookies_path}), 500
+
+
 @app.route("/info")
 def info():
     url = request.args.get("url", "")
