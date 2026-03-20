@@ -42,10 +42,15 @@ def _cookies_file():
             if "=" not in pair:
                 continue
             name, _, value = pair.partition("=")
-            # Use far-future expiry; yt-dlp only needs name+value to authenticate
-            lines.append(
-                f".youtube.com\tTRUE\t/\tFALSE\t9999999999\t{name.strip()}\t{value.strip()}"
-            )
+            name = name.strip()
+            value = value.strip()
+            # Write each cookie for both domains so yt-dlp finds SAPISID
+            # under .google.com (needed for SAPISIDHASH) and session cookies
+            # under .youtube.com
+            for domain in (".google.com", ".youtube.com"):
+                lines.append(
+                    f"{domain}\tTRUE\t/\tTRUE\t9999999999\t{name}\t{value}"
+                )
         content = "\n".join(lines) + "\n"
     else:
         content = os.environ.get("YOUTUBE_COOKIES", "").strip()
