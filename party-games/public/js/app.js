@@ -285,7 +285,7 @@ const App = (() => {
   }
 
   window._appState = state;
-  return { init, showScreen, state, gameName, renderScoreboard, registerGame, esc };
+  return { init, showScreen, state, gameName, renderScoreboard, registerGame, esc, GameModules };
 })();
 
 document.addEventListener('DOMContentLoaded', App.init);

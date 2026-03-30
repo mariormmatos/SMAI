@@ -11,6 +11,7 @@ const PlayerController = (() => {
     SocketClient.on('round_start', (data) => {
       if (App.state.isHost) return;
       App.state.round = data.round;
+      if (data.gameType) App.state.game = data.gameType;
       renderPlayerRound(data);
     });
 
@@ -98,14 +99,7 @@ const PlayerController = (() => {
   }
 
   function getGameModule(game) {
-    const map = {
-      quiz: typeof QuizGame !== 'undefined' ? QuizGame : null,
-      bluff: typeof BluffGame !== 'undefined' ? BluffGame : null,
-      creative: typeof CreativeGame !== 'undefined' ? CreativeGame : null,
-      mission: typeof MissionGame !== 'undefined' ? MissionGame : null,
-      consensus: typeof ConsensusGame !== 'undefined' ? ConsensusGame : null,
-    };
-    return map[game] || null;
+    return (App.GameModules && App.GameModules[game]) || null;
   }
 
   return { init, clearTimer };
