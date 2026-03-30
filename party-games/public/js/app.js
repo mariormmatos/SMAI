@@ -190,12 +190,12 @@ const App = (() => {
     const startBtn = document.getElementById('btn-start');
     const hint = document.getElementById('start-hint');
     if (startBtn) {
-      startBtn.disabled = players.length < 2;
+      startBtn.disabled = players.length < 1;
     }
     if (hint) {
-      hint.textContent = players.length >= 2
-        ? `${players.length} jogadores prontos!`
-        : 'Precisas de pelo menos 2 jogadores';
+      hint.textContent = players.length >= 1
+        ? `${players.length} jogador${players.length > 1 ? 'es' : ''} pronto${players.length > 1 ? 's' : ''}!`
+        : 'Precisas de pelo menos 1 jogador';
     }
     // Update waiting screen player list
     const wp = document.getElementById('waiting-players');

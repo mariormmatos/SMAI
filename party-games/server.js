@@ -107,8 +107,8 @@ io.on('connection', (socket) => {
   socket.on('start_game', () => {
     const session = findSessionByHost(socket.id);
     if (!session) return;
-    if (session.players.length < 2) {
-      socket.emit('start_error', { message: 'Precisas de pelo menos 2 jogadores.' });
+    if (session.players.length < 1) {
+      socket.emit('start_error', { message: 'Precisas de pelo menos 1 jogador.' });
       return;
     }
     session.phase = 'playing';
