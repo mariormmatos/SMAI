@@ -201,9 +201,23 @@ function startNextRound(session) {
   session.gameData.currentVotes = {};
   session.gameData.roundData = roundData;
   io.to(session.sessionId).emit('round_start', roundData);
+
+  // Auto-end round server-side when timeLimit expires
+  if (roundData.timeLimit) {
+    if (session.gameData.roundTimer) clearTimeout(session.gameData.roundTimer);
+    session.gameData.roundTimer = setTimeout(() => {
+      if (session.phase === 'playing') {
+        endRound(session);
+      }
+    }, (roundData.timeLimit + 2) * 1000);
+  }
 }
 
 function endRound(session) {
+  if (session.gameData.roundTimer) {
+    clearTimeout(session.gameData.roundTimer);
+    session.gameData.roundTimer = null;
+  }
   const gameModule = games.getGame(session.game);
   const result = gameModule.scoreRound(session);
   // Apply score deltas

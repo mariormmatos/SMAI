@@ -40,6 +40,11 @@ const HostController = (() => {
     }
 
     App.showScreen('screen-host-round');
+
+    const forceBtn = document.getElementById('btn-force-next');
+    if (forceBtn) {
+      forceBtn.onclick = () => SocketClient.emit('next_round', {});
+    }
   }
 
   return { init };
