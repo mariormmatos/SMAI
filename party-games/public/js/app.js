@@ -168,10 +168,11 @@ const App = (() => {
   }
 
   // Global socket listeners
-  SocketClient.on('session_created', ({ sessionId, joinUrl }) => {
+  SocketClient.on('session_created', ({ sessionId }) => {
     state.sessionId = sessionId;
     document.getElementById('lobby-session-id').textContent = sessionId;
     document.getElementById('lobby-game-name').textContent = gameName(state.game);
+    const joinUrl = `${window.location.origin}/join?s=${sessionId}`;
     QRHelper.render('qr-container', joinUrl);
     showScreen('screen-lobby');
   });
