@@ -103,6 +103,23 @@ io.on('connection', (socket) => {
     console.log(`${trimmedName} joined session ${session.sessionId}`);
   });
 
+  // PLAYER: rejoin after socket reconnect
+  socket.on('rejoin_session', ({ sessionId, name }) => {
+    const session = sessions.get(sessionId.toUpperCase());
+    if (!session) return;
+    const player = session.players.find(p => p.name.toLowerCase() === name.toLowerCase());
+    if (!player) return;
+    player.socketId = socket.id;
+    socket.join(session.sessionId);
+    socket.emit('join_success', { sessionId: session.sessionId, name: player.name, game: session.game });
+    // If round already in progress, resend current round data
+    if (session.phase === 'playing' && session.gameData.roundData) {
+      socket.emit('game_started', { game: session.game });
+      socket.emit('round_start', session.gameData.roundData);
+    }
+    console.log(`${name} rejoined session ${session.sessionId}`);
+  });
+
   // HOST: start the game
   socket.on('start_game', () => {
     const session = findSessionByHost(socket.id);

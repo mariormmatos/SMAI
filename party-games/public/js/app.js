@@ -284,6 +284,7 @@ const App = (() => {
     GameModules[name] = module;
   }
 
+  window._appState = state;
   return { init, showScreen, state, gameName, renderScoreboard, registerGame, esc };
 })();
 
