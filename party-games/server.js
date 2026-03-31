@@ -124,17 +124,17 @@ io.on('connection', (socket) => {
   socket.on('start_game', ({ hostName } = {}) => {
     const session = findSessionByHost(socket.id);
     if (!session) return;
-    // Add host as a player if they provided a name
-    if (hostName && hostName.trim()) {
-      const trimmed = hostName.trim().substring(0, 20);
-      const alreadyIn = session.players.some(p => p.name.toLowerCase() === trimmed.toLowerCase());
-      if (!alreadyIn) {
-        session.players.push({ socketId: socket.id, name: trimmed, score: 0, isHost: true });
+    // Always add host as a player
+    const name = (hostName && hostName.trim()) ? hostName.trim().substring(0, 20) : 'Anfitrião';
+    const alreadyIn = session.players.some(p => p.socketId === socket.id);
+    if (!alreadyIn) {
+      // If name taken, append suffix
+      let finalName = name;
+      let suffix = 2;
+      while (session.players.some(p => p.name.toLowerCase() === finalName.toLowerCase())) {
+        finalName = `${name}${suffix++}`;
       }
-    }
-    if (session.players.length < 1) {
-      socket.emit('start_error', { message: 'Precisas de pelo menos 1 jogador.' });
-      return;
+      session.players.push({ socketId: socket.id, name: finalName, score: 0, isHost: true });
     }
     session.phase = 'playing';
     session.round = 0;

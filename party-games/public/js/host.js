@@ -28,11 +28,9 @@ const HostController = (() => {
     if (!content) return;
 
     const gameModule = App.GameModules ? App.GameModules[App.state.game] : null;
-    // If host has a name (is also a player), show interactive player view
-    if (App.state.playerName && gameModule && gameModule.renderPlayerRound) {
-      gameModule.renderPlayerRound(data, content, App.state.playerName);
-    } else if (gameModule && gameModule.renderHostRound) {
-      gameModule.renderHostRound(data, content);
+    // Host always plays as a participant — show interactive view
+    if (gameModule && gameModule.renderPlayerRound) {
+      gameModule.renderPlayerRound(data, content, App.state.playerName || 'Anfitrião');
     } else {
       content.innerHTML = `
         <div class="info-box">

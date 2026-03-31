@@ -145,9 +145,9 @@ const App = (() => {
 
   function setupLobbyScreen() {
     document.getElementById('btn-start').addEventListener('click', () => {
-      const hostName = document.getElementById('input-host-name').value.trim();
-      if (hostName) state.playerName = hostName;
-      SocketClient.emit('start_game', { hostName: hostName || null });
+      const hostName = document.getElementById('input-host-name').value.trim() || 'Anfitrião';
+      state.playerName = hostName;
+      SocketClient.emit('start_game', { hostName });
     });
   }
 
