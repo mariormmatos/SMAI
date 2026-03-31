@@ -254,12 +254,18 @@ const App = (() => {
     const medals = ['🥇', '🥈', '🥉'];
     const classes = ['first', 'second', 'third'];
 
+    // Assign ranks respecting ties (same score = same rank)
+    const ranked = scores.map((p, i) => {
+      const rank = scores.findIndex(s => s.score === p.score);
+      return { ...p, rank };
+    });
+
     top3.innerHTML = '';
-    scores.slice(0, 3).forEach((p, i) => {
+    ranked.slice(0, 3).forEach((p) => {
       const div = document.createElement('div');
-      div.className = `podium-place ${classes[i]}`;
+      div.className = `podium-place ${classes[p.rank] || 'third'}`;
       div.innerHTML = `
-        <div class="podium-medal">${medals[i]}</div>
+        <div class="podium-medal">${medals[p.rank] || '🏅'}</div>
         <div class="podium-name">${esc(p.name)}</div>
         <div class="podium-score">${p.score} pts</div>
         <div class="podium-bar"></div>
@@ -268,10 +274,10 @@ const App = (() => {
     });
 
     ranking.innerHTML = '';
-    scores.slice(3).forEach((p, i) => {
+    ranked.slice(3).forEach((p) => {
       const li = document.createElement('li');
       li.innerHTML = `
-        <span class="final-rank-num">${i + 4}.</span>
+        <span class="final-rank-num">${p.rank + 1}.</span>
         <span class="final-rank-name">${esc(p.name)}</span>
         <span class="final-rank-pts">${p.score} pts</span>
       `;
