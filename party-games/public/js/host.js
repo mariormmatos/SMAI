@@ -9,6 +9,7 @@ const HostController = (() => {
     SocketClient.on('round_start', (data) => {
       if (!App.state.isHost) return;
       App.state.round = data.round;
+      if (data.gameType) App.state.game = data.gameType;
       renderHostRound(data);
     });
 
@@ -27,7 +28,10 @@ const HostController = (() => {
     if (!content) return;
 
     const gameModule = App.GameModules ? App.GameModules[App.state.game] : null;
-    if (gameModule && gameModule.renderHostRound) {
+    // If host has a name (is also a player), show interactive player view
+    if (App.state.playerName && gameModule && gameModule.renderPlayerRound) {
+      gameModule.renderPlayerRound(data, content, App.state.playerName);
+    } else if (gameModule && gameModule.renderHostRound) {
       gameModule.renderHostRound(data, content);
     } else {
       content.innerHTML = `
