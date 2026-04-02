@@ -160,6 +160,13 @@ io.on('connection', (socket) => {
       // called when all players have answered
       endRound(session);
     });
+    // If game just entered a vote phase (e.g. mission accepted), reset the round timer
+    if (session.gameData.phase === 'vote' && session.gameData.votingTimeLimit) {
+      if (session.gameData.roundTimer) clearTimeout(session.gameData.roundTimer);
+      session.gameData.roundTimer = setTimeout(() => {
+        if (session.phase === 'playing') endRound(session);
+      }, (session.gameData.votingTimeLimit + 2) * 1000);
+    }
   });
 
   // PLAYER: cast a vote

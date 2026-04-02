@@ -162,6 +162,7 @@ module.exports = {
 
     // Accepted — tell group to perform mission and then vote
     session.gameData.phase = 'vote';
+    session.gameData.votingTimeLimit = TIME_LIMIT_VOTE;
     if (session._io) {
       session._io.to(session.sessionId).emit('voting_start', {
         gameType: 'mission',

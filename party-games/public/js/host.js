@@ -1,5 +1,30 @@
 // Host-specific logic
 const HostController = (() => {
+  let hostTimerInterval = null;
+
+  function startHostTimer(seconds) {
+    clearHostTimer();
+    const barFill = document.querySelector('#host-round-content .timer-bar-fill');
+    let remaining = seconds;
+    function update() {
+      if (barFill) {
+        const pct = (remaining / seconds) * 100;
+        barFill.style.width = pct + '%';
+        barFill.style.background = pct <= 30 ? '#f85149' : pct <= 60 ? '#d29922' : '#7c3aed';
+      }
+    }
+    update();
+    hostTimerInterval = setInterval(() => {
+      remaining--;
+      update();
+      if (remaining <= 0) clearHostTimer();
+    }, 1000);
+  }
+
+  function clearHostTimer() {
+    if (hostTimerInterval) { clearInterval(hostTimerInterval); hostTimerInterval = null; }
+  }
+
   function init() {
     SocketClient.on('game_started', ({ game }) => {
       if (!App.state.isHost) return;
@@ -10,7 +35,19 @@ const HostController = (() => {
       if (!App.state.isHost) return;
       App.state.round = data.round;
       if (data.gameType) App.state.game = data.gameType;
+      clearHostTimer();
       renderHostRound(data);
+    });
+
+    SocketClient.on('voting_start', (data) => {
+      if (!App.state.isHost) return;
+      const content = document.getElementById('host-round-content');
+      if (!content) return;
+      const gameModule = App.GameModules ? App.GameModules[App.state.game] : null;
+      if (gameModule && gameModule.renderVoting) {
+        gameModule.renderVoting(data, content, App.state.playerName || 'Anfitrião');
+      }
+      if (data.timeLimit) startHostTimer(data.timeLimit);
     });
 
     SocketClient.on('all_answered', ({ count, total }) => {
