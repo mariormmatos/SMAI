@@ -18,7 +18,9 @@ const SocketClient = (() => {
       console.log('Socket connected:', socket.id);
       // On reconnect, rejoin session if we were already in one
       const s = window._appState;
-      if (s && s.sessionId && s.playerName && !s.isHost) {
+      if (s && s.sessionId && s.isHost) {
+        socket.emit('rejoin_host', { sessionId: s.sessionId });
+      } else if (s && s.sessionId && s.playerName) {
         socket.emit('rejoin_session', { sessionId: s.sessionId, name: s.playerName });
       }
     });

@@ -220,6 +220,16 @@ const App = (() => {
     if (errorEl) errorEl.textContent = message;
   });
 
+  SocketClient.on('session_expired', () => {
+    // Host's session was deleted before they could rejoin
+    state.sessionId = null;
+    state.playerName = null;
+    state.game = null;
+    state.round = 0;
+    state.scores = [];
+    showScreen('screen-home');
+  });
+
   SocketClient.on('start_error', ({ message }) => {
     alert(message);
   });

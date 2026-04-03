@@ -186,6 +186,31 @@ io.on('connection', (socket) => {
     finishGame(session);
   });
 
+  // HOST: rejoin after socket reconnect
+  socket.on('rejoin_host', ({ sessionId }) => {
+    const session = sessions.get((sessionId || '').toUpperCase());
+    if (!session) {
+      socket.emit('session_expired', {});
+      return;
+    }
+    // Cancel any pending delete timer
+    if (session._hostDeleteTimer) {
+      clearTimeout(session._hostDeleteTimer);
+      session._hostDeleteTimer = null;
+    }
+    session.hostSocketId = socket.id;
+    socket.join(session.sessionId);
+    console.log(`Host rejoined session ${session.sessionId}`);
+
+    if (session.phase === 'lobby') {
+      socket.emit('session_created', { sessionId: session.sessionId, joinUrl: session.joinUrl });
+      socket.emit('player_joined', { players: session.players.map(p => ({ name: p.name, score: p.score })) });
+    } else if (session.phase === 'playing' && session.gameData.roundData) {
+      socket.emit('game_started', { game: session.game });
+      socket.emit('round_start', session.gameData.roundData);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
     // Remove player from session if they disconnect
@@ -195,9 +220,12 @@ io.on('connection', (socket) => {
         session.players.splice(idx, 1);
         io.to(sessionId).emit('player_joined', { players: session.players.map(p => ({ name: p.name, score: p.score })) });
       }
-      // Clean up host sessions
+      // Give host a 60s grace period before deleting the session
       if (session.hostSocketId === socket.id) {
-        sessions.delete(sessionId);
+        session._hostDeleteTimer = setTimeout(() => {
+          sessions.delete(sessionId);
+          console.log(`Session ${sessionId} deleted (host did not reconnect)`);
+        }, 60000);
       }
     }
   });
