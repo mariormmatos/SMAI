@@ -107,8 +107,20 @@ io.on('connection', (socket) => {
   socket.on('rejoin_session', ({ sessionId, name }) => {
     const session = sessions.get(sessionId.toUpperCase());
     if (!session) return;
-    const player = session.players.find(p => p.name.toLowerCase() === name.toLowerCase());
-    if (!player) return;
+    let player = session.players.find(p => p.name.toLowerCase() === name.toLowerCase());
+    if (!player) {
+      // Player was removed from lobby during brief disconnect — re-add them
+      if (session.phase !== 'lobby') return;
+      const trimmedName = (name || '').trim().substring(0, 20);
+      if (!trimmedName) return;
+      player = { socketId: socket.id, name: trimmedName, score: 0 };
+      session.players.push(player);
+      socket.join(session.sessionId);
+      socket.emit('join_success', { sessionId: session.sessionId, name: player.name, game: session.game });
+      io.to(session.sessionId).emit('player_joined', { players: session.players.map(p => ({ name: p.name, score: p.score })) });
+      console.log(`${trimmedName} re-joined session ${session.sessionId} after lobby disconnect`);
+      return;
+    }
     player.socketId = socket.id;
     socket.join(session.sessionId);
     socket.emit('join_success', { sessionId: session.sessionId, name: player.name, game: session.game });
@@ -116,6 +128,10 @@ io.on('connection', (socket) => {
     if (session.phase === 'playing' && session.gameData.roundData) {
       socket.emit('game_started', { game: session.game });
       socket.emit('round_start', session.gameData.roundData);
+    }
+    // If in lobby, update host with current player list
+    if (session.phase === 'lobby') {
+      io.to(session.sessionId).emit('player_joined', { players: session.players.map(p => ({ name: p.name, score: p.score })) });
     }
     console.log(`${name} rejoined session ${session.sessionId}`);
   });
