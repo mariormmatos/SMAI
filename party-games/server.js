@@ -8,7 +8,11 @@ const games = require('./games/index');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const io = new Server(server, {
+  cors: { origin: '*' },
+  pingTimeout: 30000,   // 30s before declaring client disconnected
+  pingInterval: 10000,  // ping every 10s for faster drop detection on mobile
+});
 
 const PORT = process.env.PORT || 3000;
 
@@ -128,6 +132,16 @@ io.on('connection', (socket) => {
     if (session.phase === 'playing' && session.gameData.roundData) {
       socket.emit('game_started', { game: session.game });
       socket.emit('round_start', session.gameData.roundData);
+      // Also resend voting_start if currently in vote phase (e.g. mission game)
+      if (session.gameData.phase === 'vote') {
+        socket.emit('voting_start', {
+          gameType: session.game,
+          hotSeatName: session.gameData.hotSeat,
+          mission: session.gameData.currentMission,
+          timeLimit: session.gameData.votingTimeLimit || 20,
+          phase: 'vote',
+        });
+      }
     }
     // If in lobby, update host with current player list
     if (session.phase === 'lobby') {
@@ -224,6 +238,15 @@ io.on('connection', (socket) => {
     } else if (session.phase === 'playing' && session.gameData.roundData) {
       socket.emit('game_started', { game: session.game });
       socket.emit('round_start', session.gameData.roundData);
+      if (session.gameData.phase === 'vote') {
+        socket.emit('voting_start', {
+          gameType: session.game,
+          hotSeatName: session.gameData.hotSeat,
+          mission: session.gameData.currentMission,
+          timeLimit: session.gameData.votingTimeLimit || 20,
+          phase: 'vote',
+        });
+      }
     }
   });
 

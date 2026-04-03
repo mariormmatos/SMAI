@@ -6,7 +6,12 @@ const SocketClient = (() => {
   const handlers = {};
 
   function connect() {
-    socket = io({ transports: ['websocket', 'polling'] });
+    socket = io({
+      transports: ['websocket', 'polling'],
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 3000,
+      timeout: 10000,
+    });
 
     socket.onAny((event, ...args) => {
       if (handlers[event]) {
@@ -16,6 +21,7 @@ const SocketClient = (() => {
 
     socket.on('connect', () => {
       console.log('Socket connected:', socket.id);
+      setConnectionBanner(false);
       // On reconnect, rejoin session if we were already in one
       const s = window._appState;
       if (s && s.sessionId && s.isHost) {
@@ -27,6 +33,11 @@ const SocketClient = (() => {
 
     socket.on('disconnect', () => {
       console.log('Socket disconnected');
+      setConnectionBanner(true);
+    });
+
+    socket.on('connect_error', () => {
+      setConnectionBanner(true);
     });
   }
 
@@ -43,6 +54,11 @@ const SocketClient = (() => {
   function emit(event, data) {
     if (!socket) return;
     socket.emit(event, data || {});
+  }
+
+  function setConnectionBanner(show) {
+    const el = document.getElementById('connection-banner');
+    if (el) el.style.display = show ? 'flex' : 'none';
   }
 
   return { connect, on, off, emit };
