@@ -1,5 +1,4 @@
 // Artista Relâmpago — client-side UI
-
 const CreativeGame = (() => {
   let submitted = false;
   let voted = false;
@@ -15,19 +14,27 @@ const CreativeGame = (() => {
         <button class="btn btn-primary" id="creative-submit">Enviar Resposta ✓</button>
       </div>
     `;
-    document.getElementById('creative-submit').addEventListener('click', submitAnswer);
+    // FIX: capture container in closure
+    document.getElementById('creative-submit').addEventListener('click', () => submitAnswer(container));
     document.getElementById('creative-answer').addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAnswer(); }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        submitAnswer(container);
+      }
     });
   }
 
-  function submitAnswer() {
+  function submitAnswer(container) {
     if (submitted) return;
     const val = (document.getElementById('creative-answer') || {}).value || '';
-    if (!val.trim()) { alert('Escreve uma resposta primeiro!'); return; }
+    if (!val.trim()) {
+      alert('Escreve uma resposta primeiro!');
+      return;
+    }
     submitted = true;
     SocketClient.emit('submit_answer', { answer: val.trim() });
-    const container = document.getElementById('round-content');
+
+    // FIX: use the captured container instead of hardcoded getElementById
     if (container) {
       container.innerHTML = `
         <div class="answered-state">

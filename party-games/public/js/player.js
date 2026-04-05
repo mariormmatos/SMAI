@@ -23,7 +23,6 @@ const PlayerController = (() => {
 
   function renderPlayerRound(data) {
     clearTimer();
-
     const roundNum = document.getElementById('round-number');
     if (roundNum) roundNum.textContent = `Ronda ${data.round}`;
 
@@ -31,7 +30,6 @@ const PlayerController = (() => {
     if (!content) return;
 
     // Delegate to game module
-    const gameModule = window[`Game_${data.gameType || App.state.game}`];
     const mod = getGameModule(App.state.game);
     if (mod && mod.renderPlayerRound) {
       mod.renderPlayerRound(data, content, App.state.playerName);
@@ -48,16 +46,23 @@ const PlayerController = (() => {
   }
 
   function renderVotingPhase(data) {
+    clearTimer();
     const content = document.getElementById('round-content');
     if (!content) return;
+
     const mod = getGameModule(App.state.game);
     if (mod && mod.renderVoting) {
       mod.renderVoting(data, content, App.state.playerName);
     }
+
     if (data.timeLimit) {
-      clearTimer();
       startTimer(data.timeLimit);
     }
+
+    // FIX: always navigate to screen-round for voting phase.
+    // Without this, players on a different screen (e.g. after a reconnect)
+    // would never see the voting UI.
+    App.showScreen('screen-round');
   }
 
   function startTimer(seconds) {

@@ -1,11 +1,9 @@
 // Mente Coletiva — client-side UI
-
 const ConsensusGame = (() => {
   let submitted = false;
 
   function renderPlayerRound(data, container, myName) {
     submitted = false;
-    // Find my partner
     const pairMap = data.pairMap || {};
     const partner = pairMap[myName];
     const partnerHtml = partner
@@ -18,25 +16,29 @@ const ConsensusGame = (() => {
       ${partnerHtml}
       <div class="question-text">${App.esc(data.prompt)}</div>
       <div class="answer-input-wrap">
-        <input type="text" class="form-input" id="consensus-answer"
-          placeholder="A tua resposta..." maxlength="60" autocomplete="off" autocorrect="off">
+        <input type="text" class="form-input" id="consensus-answer" placeholder="A tua resposta..." maxlength="60" autocomplete="off" autocorrect="off">
         <button class="btn btn-primary" id="consensus-submit">Enviar ✓</button>
       </div>
     `;
-    document.getElementById('consensus-submit').addEventListener('click', submitAnswer);
+    // FIX: capture container in closure
+    document.getElementById('consensus-submit').addEventListener('click', () => submitAnswer(container));
     document.getElementById('consensus-answer').addEventListener('keydown', e => {
-      if (e.key === 'Enter') submitAnswer();
+      if (e.key === 'Enter') submitAnswer(container);
     });
     setTimeout(() => document.getElementById('consensus-answer')?.focus(), 200);
   }
 
-  function submitAnswer() {
+  function submitAnswer(container) {
     if (submitted) return;
     const val = (document.getElementById('consensus-answer') || {}).value || '';
-    if (!val.trim()) { alert('Escreve uma resposta!'); return; }
+    if (!val.trim()) {
+      alert('Escreve uma resposta!');
+      return;
+    }
     submitted = true;
     SocketClient.emit('submit_answer', { answer: val.trim() });
-    const container = document.getElementById('round-content');
+
+    // FIX: use the captured container instead of hardcoded getElementById
     if (container) {
       container.innerHTML = `
         <div class="answered-state">
@@ -63,7 +65,6 @@ const ConsensusGame = (() => {
     const content = document.getElementById('result-content');
     if (!content) return;
     if (!result.revealList) return;
-
     content.innerHTML = `
       <div class="consensus-reveal">
         ${result.revealList.map(r => `

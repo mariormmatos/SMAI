@@ -1,5 +1,4 @@
 // Verdade ou Mentira — client-side UI
-
 const BluffGame = (() => {
   let voted = false;
   let answered = false;
@@ -26,13 +25,9 @@ const BluffGame = (() => {
           </div>
         </div>
       `;
-
-      document.getElementById('bluff-truth-btn').addEventListener('click', () => {
-        submitBluffAnswer(true);
-      });
-      document.getElementById('bluff-lie-btn').addEventListener('click', () => {
-        submitBluffAnswer(false);
-      });
+      // FIX: capture container in closure to ensure correct element is updated
+      document.getElementById('bluff-truth-btn').addEventListener('click', () => submitBluffAnswer(true, container));
+      document.getElementById('bluff-lie-btn').addEventListener('click', () => submitBluffAnswer(false, container));
     } else {
       container.innerHTML = `
         <div class="timer-bar-wrap"><div class="timer-bar-fill" style="width:100%"></div></div>
@@ -45,7 +40,7 @@ const BluffGame = (() => {
     }
   }
 
-  function submitBluffAnswer(isTrue) {
+  function submitBluffAnswer(isTrue, container) {
     if (answered) return;
     const text = (document.getElementById('bluff-answer') || {}).value || '';
     if (!text.trim()) {
@@ -54,7 +49,8 @@ const BluffGame = (() => {
     }
     answered = true;
     SocketClient.emit('submit_answer', { answer: { text: text.trim(), isTrue } });
-    const container = document.getElementById('round-content');
+
+    // FIX: use the container captured in renderPlayerRound, not hardcoded getElementById
     if (container) {
       container.innerHTML = `
         <div class="answered-state">
@@ -102,7 +98,6 @@ const BluffGame = (() => {
         </div>
       </div>
     `;
-
     document.getElementById('vote-truth').addEventListener('click', () => castVote('truth'));
     document.getElementById('vote-lie').addEventListener('click', () => castVote('lie'));
   }
@@ -111,7 +106,10 @@ const BluffGame = (() => {
     if (voted) return;
     voted = true;
     SocketClient.emit('cast_vote', { vote: v });
-    document.querySelectorAll('.vote-btn').forEach(b => { b.disabled = true; b.classList.add('selected'); });
+    document.querySelectorAll('.vote-btn').forEach(b => {
+      b.disabled = true;
+      b.classList.add('selected');
+    });
     const container = document.getElementById('round-content');
     if (container) {
       const hint = document.createElement('div');
@@ -139,7 +137,6 @@ const BluffGame = (() => {
     const voteResults = Object.entries(result.votes || {})
       .map(([name, v]) => `<span class="chip ${v === result.correctVote ? 'chip-green' : 'chip-red'}">${App.esc(name)}: ${v === 'truth' ? 'Verdade' : 'Mentira'}</span>`)
       .join(' ');
-
     content.innerHTML = `
       <div class="info-box">
         <div style="font-size: 13px; color: var(--text2); margin-bottom: 4px;">${App.esc(result.hotSeatName)} disse:</div>

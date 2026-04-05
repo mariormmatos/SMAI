@@ -127,27 +127,43 @@ io.on('connection', (socket) => {
     }
     player.socketId = socket.id;
     socket.join(session.sessionId);
-    socket.emit('join_success', { sessionId: session.sessionId, name: player.name, game: session.game });
-    // If round already in progress, resend current round data
-    if (session.phase === 'playing' && session.gameData.roundData) {
+
+    if (session.phase === 'lobby') {
+      // Lobby: use join_success so client shows waiting screen with game info
+      socket.emit('join_success', { sessionId: session.sessionId, name: player.name, game: session.game });
+      io.to(session.sessionId).emit('player_joined', { players: session.players.map(p => ({ name: p.name, score: p.score })) });
+
+    } else if (session.phase === 'playing' && session.gameData.roundData) {
+      // FIX: mid-game rejoin — do NOT send join_success (which would bounce
+      // the player to screen-waiting). Instead restore game state directly.
       socket.emit('game_started', { game: session.game });
       socket.emit('round_start', session.gameData.roundData);
-      // Also resend voting_start if currently in vote phase (e.g. mission game)
+      // Resend voting_start if currently in vote phase
       if (session.gameData.phase === 'vote') {
         socket.emit('voting_start', {
           gameType: session.game,
           hotSeatName: session.gameData.hotSeat,
           mission: session.gameData.currentMission,
+          answer: session.gameData.bluffAnswer,    // for bluff game
+          question: session.gameData.currentQuestion, // for bluff game
           timeLimit: session.gameData.votingTimeLimit || 20,
           phase: 'vote',
         });
       }
+
+    } else if (session.phase === 'round_result') {
+      // FIX: player rejoined during result screen — resend round_end so they
+      // can see the scoreboard and wait for the next round.
+      if (session.gameData.lastRoundResult) {
+        socket.emit('game_started', { game: session.game });
+        socket.emit('round_end', {
+          ...session.gameData.lastRoundResult,
+          scores: session.players.map(p => ({ name: p.name, score: p.score })).sort((a, b) => b.score - a.score),
+        });
+      }
     }
-    // If in lobby, update host with current player list
-    if (session.phase === 'lobby') {
-      io.to(session.sessionId).emit('player_joined', { players: session.players.map(p => ({ name: p.name, score: p.score })) });
-    }
-    console.log(`${name} rejoined session ${session.sessionId}`);
+
+    console.log(`${name} rejoined session ${session.sessionId} (phase: ${session.phase})`);
   });
 
   // HOST: start the game
@@ -208,6 +224,9 @@ io.on('connection', (socket) => {
       endRound(session);
     });
   });
+
+  // Keepalive ping from client — prevents Railway proxy from dropping idle WS connections
+  socket.on('keepalive', () => { /* no-op — just keeps the socket alive */ });
 
   // HOST: end game early
   socket.on('end_game', () => {
@@ -308,6 +327,8 @@ function endRound(session) {
     if (player) player.score += delta;
   });
   session.phase = 'round_result';
+  // FIX: persist last result so rejoining players can receive it
+  session.gameData.lastRoundResult = result;
   io.to(session.sessionId).emit('round_end', {
     ...result,
     scores: session.players.map(p => ({ name: p.name, score: p.score })).sort((a, b) => b.score - a.score),

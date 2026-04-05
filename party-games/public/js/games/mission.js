@@ -1,5 +1,4 @@
 // Missão ou Castigo — client-side UI
-
 const MissionGame = (() => {
   let decided = false;
   let voted = false;
@@ -21,8 +20,10 @@ const MissionGame = (() => {
           <button class="btn-refuse" id="btn-refuse">❌ Recuso</button>
         </div>
       `;
-      document.getElementById('btn-accept').addEventListener('click', () => decide('accept'));
-      document.getElementById('btn-refuse').addEventListener('click', () => decide('refuse'));
+      // FIX: capture the container in closure so decide() uses the correct
+      // element regardless of whether we're the host or a regular player.
+      document.getElementById('btn-accept').addEventListener('click', () => decide('accept', container));
+      document.getElementById('btn-refuse').addEventListener('click', () => decide('refuse', container));
     } else {
       container.innerHTML = `
         <div class="timer-bar-wrap"><div class="timer-bar-fill" style="width:100%"></div></div>
@@ -40,12 +41,16 @@ const MissionGame = (() => {
     }
   }
 
-  function decide(choice) {
+  function decide(choice, container) {
     if (decided) return;
     decided = true;
     SocketClient.emit('submit_answer', { answer: choice });
-    const container = document.getElementById('round-content');
+
+    // FIX: use the container passed in from renderPlayerRound instead of
+    // hardcoded getElementById('round-content') which is null for the host
+    // (whose content lives in #host-round-content).
     if (!container) return;
+
     if (choice === 'accept') {
       container.innerHTML = `
         <div class="answered-state">

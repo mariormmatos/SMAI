@@ -212,7 +212,14 @@ const App = (() => {
     state.game = game;
     const badge = document.getElementById('waiting-game-badge');
     if (badge) badge.textContent = gameName(game);
-    showScreen('screen-waiting');
+    // FIX: only navigate to screen-waiting if the game hasn't started yet.
+    // During a mid-game rejoin the server no longer sends join_success, but
+    // as a safety net we avoid bouncing the player away from an active screen.
+    const activeScreen = document.querySelector('.screen.active')?.id;
+    const inActiveGame = activeScreen === 'screen-round' || activeScreen === 'screen-host-round' || activeScreen === 'screen-round-result';
+    if (!inActiveGame) {
+      showScreen('screen-waiting');
+    }
   });
 
   SocketClient.on('join_error', ({ message }) => {
