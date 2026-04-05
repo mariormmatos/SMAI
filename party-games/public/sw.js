@@ -1,4 +1,4 @@
-const CACHE_NAME = 'party-games-v13';
+const CACHE_NAME = 'party-games-v14';
 const SHELL_FILES = [
   '/',
   '/index.html',

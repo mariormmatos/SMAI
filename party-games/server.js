@@ -10,8 +10,9 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
-  pingTimeout: 30000,   // 30s before declaring client disconnected
-  pingInterval: 10000,  // ping every 10s for faster drop detection on mobile
+  pingTimeout: 20000,   // 20s before declaring client disconnected
+  pingInterval: 15000,  // ping every 15s — keeps Railway proxy alive (timeout ~40s)
+  transports: ['websocket', 'polling'], // prefer WebSocket, fallback to polling
 });
 
 const PORT = process.env.PORT || 3000;
@@ -264,6 +265,16 @@ io.on('connection', (socket) => {
           mission: session.gameData.currentMission,
           timeLimit: session.gameData.votingTimeLimit || 20,
           phase: 'vote',
+        });
+      }
+    } else if (session.phase === 'round_result') {
+      // FIX: host rejoined during result screen — resend round_end so host
+      // sees the scoreboard and can advance to the next round.
+      if (session.gameData.lastRoundResult) {
+        socket.emit('game_started', { game: session.game });
+        socket.emit('round_end', {
+          ...session.gameData.lastRoundResult,
+          scores: session.players.map(p => ({ name: p.name, score: p.score })).sort((a, b) => b.score - a.score),
         });
       }
     }
