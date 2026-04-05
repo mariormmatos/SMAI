@@ -10,9 +10,13 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*' },
-  pingTimeout: 20000,   // 20s before declaring client disconnected
-  pingInterval: 15000,  // ping every 15s — keeps Railway proxy alive (timeout ~40s)
-  transports: ['websocket', 'polling'], // prefer WebSocket, fallback to polling
+  pingTimeout: 60000,   // 60s — generous timeout for mobile networks with latency spikes
+  pingInterval: 10000,  // ping every 10s — keeps Railway/Cloudflare proxy alive
+  transports: ['websocket', 'polling'],
+  // Allow upgrades from polling to websocket for mobile clients
+  allowUpgrades: true,
+  // Larger max payload for game data
+  maxHttpBufferSize: 1e6,
 });
 
 const PORT = process.env.PORT || 3000;
@@ -289,12 +293,13 @@ io.on('connection', (socket) => {
         session.players.splice(idx, 1);
         io.to(sessionId).emit('player_joined', { players: session.players.map(p => ({ name: p.name, score: p.score })) });
       }
-      // Give host a 60s grace period before deleting the session
+      // Give host a 120s grace period before deleting the session
+      // (mobile devices may take time to reconnect after screen lock / app switch)
       if (session.hostSocketId === socket.id) {
         session._hostDeleteTimer = setTimeout(() => {
           sessions.delete(sessionId);
           console.log(`Session ${sessionId} deleted (host did not reconnect)`);
-        }, 60000);
+        }, 120000);
       }
     }
   });

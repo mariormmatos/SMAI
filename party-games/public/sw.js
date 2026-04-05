@@ -1,4 +1,4 @@
-const CACHE_NAME = 'party-games-v14';
+const CACHE_NAME = 'party-games-v15';
 const SHELL_FILES = [
   '/',
   '/index.html',
@@ -37,12 +37,28 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip Socket.io and API calls — always network
+  // Skip Socket.io, API calls, and join redirect — always network
   if (url.pathname.startsWith('/socket.io') || url.pathname.startsWith('/join')) {
     return;
   }
 
-  // Cache-first for shell assets
+  // For JS files: network-first with cache fallback
+  // This ensures mobile devices always get the latest code
+  if (url.pathname.endsWith('.js')) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          // Update cache with fresh version
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // For other assets (CSS, images, HTML): cache-first for speed
   event.respondWith(
     caches.match(event.request).then((cached) => {
       return cached || fetch(event.request);

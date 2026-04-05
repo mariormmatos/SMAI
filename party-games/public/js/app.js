@@ -165,6 +165,7 @@ const App = (() => {
       state.game = null;
       state.round = 0;
       state.scores = [];
+      SocketClient.clearSession();
       showScreen('screen-home');
     });
   }
@@ -172,6 +173,7 @@ const App = (() => {
   // Global socket listeners
   SocketClient.on('session_created', ({ sessionId }) => {
     state.sessionId = sessionId;
+    SocketClient.persistSession(sessionId, state.playerName, state.isHost);
     document.getElementById('lobby-session-id').textContent = sessionId;
     document.getElementById('lobby-game-name').textContent = gameName(state.game);
     const joinUrl = `${window.location.origin}/join?s=${sessionId}`;
@@ -210,6 +212,7 @@ const App = (() => {
     state.sessionId = sessionId;
     state.playerName = name;
     state.game = game;
+    SocketClient.persistSession(sessionId, name, state.isHost);
     const badge = document.getElementById('waiting-game-badge');
     if (badge) badge.textContent = gameName(game);
     // FIX: only navigate to screen-waiting if the game hasn't started yet.
@@ -234,6 +237,7 @@ const App = (() => {
     state.game = null;
     state.round = 0;
     state.scores = [];
+    SocketClient.clearSession();
     showScreen('screen-home');
   });
 
