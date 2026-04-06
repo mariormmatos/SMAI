@@ -267,6 +267,12 @@ const App = (() => {
     showScreen('screen-final');
   });
 
+  // ── Global game_started handler for sync recovery ──
+  // When sync_state forces a game_started, ensure state.game is set
+  SocketClient.on('game_started', ({ game }) => {
+    state.game = game;
+  });
+
   function renderFinalPodium(scores) {
     const top3 = document.getElementById('podium-top3');
     const ranking = document.getElementById('final-ranking');

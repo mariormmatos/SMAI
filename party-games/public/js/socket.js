@@ -159,5 +159,25 @@ const SocketClient = (() => {
     if (el) el.style.display = show ? 'flex' : 'none';
   }
 
-  return { connect, on, off, emit, persistSession, clearSession };
+  // ── Server time offset tracking ──
+  // We calculate the delta between server time and local time so that
+  // server-driven endTime values can be used for accurate local timers.
+  let _serverTimeOffset = 0; // serverTime - localTime
+
+  function updateServerOffset(serverTime) {
+    if (serverTime) {
+      _serverTimeOffset = serverTime - Date.now();
+    }
+  }
+
+  function getServerNow() {
+    return Date.now() + _serverTimeOffset;
+  }
+
+  function getRemainingMs(endTime) {
+    if (!endTime) return null;
+    return Math.max(0, endTime - getServerNow());
+  }
+
+  return { connect, on, off, emit, persistSession, clearSession, updateServerOffset, getServerNow, getRemainingMs };
 })();

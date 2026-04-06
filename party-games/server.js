@@ -213,6 +213,9 @@ io.on('connection', (socket) => {
     });
     // If game just entered a vote phase (e.g. mission accepted), reset the round timer
     if (session.gameData.phase === 'vote' && session.gameData.votingTimeLimit) {
+      const now = Date.now();
+      session.gameData.phaseStartedAt = now;
+      session.gameData.phaseEndAt = now + session.gameData.votingTimeLimit * 1000;
       if (session.gameData.roundTimer) clearTimeout(session.gameData.roundTimer);
       session.gameData.roundTimer = setTimeout(() => {
         if (session.phase === 'playing') endRound(session);
@@ -317,7 +320,21 @@ function startNextRound(session) {
   session.gameData.currentAnswers = {};
   session.gameData.currentVotes = {};
   session.gameData.roundData = roundData;
-  io.to(session.sessionId).emit('round_start', roundData);
+
+  // ── Kahoot-style sync: add server timestamps ──
+  const now = Date.now();
+  session.gameData.phaseStartedAt = now;
+  session.gameData.phaseEndAt = roundData.timeLimit ? now + roundData.timeLimit * 1000 : null;
+
+  const enriched = {
+    ...roundData,
+    serverTime: now,
+    endTime: session.gameData.phaseEndAt,
+  };
+  io.to(session.sessionId).emit('round_start', enriched);
+
+  // Start sync heartbeat — pushes authoritative state to all clients every 2s
+  startSyncHeartbeat(session);
 
   // Auto-end round server-side when timeLimit expires
   if (roundData.timeLimit) {
@@ -335,6 +352,7 @@ function endRound(session) {
     clearTimeout(session.gameData.roundTimer);
     session.gameData.roundTimer = null;
   }
+  stopSyncHeartbeat(session);
   const gameModule = games.getGame(session.game);
   const result = gameModule.scoreRound(session);
   // Apply score deltas
@@ -343,15 +361,21 @@ function endRound(session) {
     if (player) player.score += delta;
   });
   session.phase = 'round_result';
+  session.gameData.phaseStartedAt = Date.now();
+  session.gameData.phaseEndAt = null;
   // FIX: persist last result so rejoining players can receive it
   session.gameData.lastRoundResult = result;
   io.to(session.sessionId).emit('round_end', {
     ...result,
     scores: session.players.map(p => ({ name: p.name, score: p.score })).sort((a, b) => b.score - a.score),
   });
+
+  // Resume heartbeat during result phase so late joiners sync
+  startSyncHeartbeat(session);
 }
 
 function finishGame(session) {
+  stopSyncHeartbeat(session);
   session.phase = 'final';
   const finalScores = session.players
     .map(p => ({ name: p.name, score: p.score }))
@@ -359,6 +383,62 @@ function finishGame(session) {
   io.to(session.sessionId).emit('game_end', { finalScores });
   // Clean up after 30 min
   setTimeout(() => sessions.delete(session.sessionId), 30 * 60 * 1000);
+}
+
+// ── Kahoot-style sync heartbeat ──
+// Broadcasts authoritative game state every 2s so all clients stay in sync.
+// This is the KEY mechanism that prevents desync: even if a client misses an
+// event, the heartbeat forces it back to the correct phase within 2 seconds.
+function buildSyncPayload(session) {
+  const now = Date.now();
+  const payload = {
+    phase: session.phase,
+    round: session.round,
+    game: session.game,
+    serverTime: now,
+    endTime: session.gameData.phaseEndAt || null,
+  };
+
+  if (session.phase === 'playing' && session.gameData.roundData) {
+    payload.roundData = session.gameData.roundData;
+    // Include voting sub-phase if active
+    if (session.gameData.phase === 'vote') {
+      payload.subPhase = 'vote';
+      payload.voteData = {
+        gameType: session.game,
+        hotSeatName: session.gameData.hotSeat,
+        mission: session.gameData.currentMission,
+        answer: session.gameData.bluffAnswer,
+        question: session.gameData.currentQuestion,
+        timeLimit: session.gameData.votingTimeLimit || 20,
+      };
+    }
+  } else if (session.phase === 'round_result' && session.gameData.lastRoundResult) {
+    payload.resultData = {
+      ...session.gameData.lastRoundResult,
+      scores: session.players.map(p => ({ name: p.name, score: p.score })).sort((a, b) => b.score - a.score),
+    };
+  }
+
+  return payload;
+}
+
+function startSyncHeartbeat(session) {
+  stopSyncHeartbeat(session);
+  session.gameData._syncInterval = setInterval(() => {
+    if (session.phase === 'final' || session.phase === 'lobby') {
+      stopSyncHeartbeat(session);
+      return;
+    }
+    io.to(session.sessionId).emit('sync_state', buildSyncPayload(session));
+  }, 2000);
+}
+
+function stopSyncHeartbeat(session) {
+  if (session.gameData._syncInterval) {
+    clearInterval(session.gameData._syncInterval);
+    session.gameData._syncInterval = null;
+  }
 }
 
 function findSessionByHost(socketId) {
