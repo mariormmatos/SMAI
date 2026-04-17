@@ -12,19 +12,26 @@ from .formatting import ensure_date_col
 
 @st.cache_data(ttl=60 * 20, show_spinner=False)
 def yf_price_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
-    t = yf.Ticker(ticker)
-    df = t.history(period=period, interval=interval, auto_adjust=False)
-    if df is None or df.empty:
+    try:
+        t = yf.Ticker(ticker)
+        df = t.history(period=period, interval=interval, auto_adjust=False)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        st.session_state["_dbg_px_err"] = repr(e)
         return pd.DataFrame()
-    return df
 
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
 def yf_info(ticker: str) -> Dict:
-    t = yf.Ticker(ticker)
     try:
-        return t.info or {}
-    except Exception:
+        t = yf.Ticker(ticker)
+        result = t.info or {}
+        st.session_state["_dbg_info_keys"] = len(result)
+        return result
+    except Exception as e:
+        st.session_state["_dbg_info_err"] = repr(e)
         return {}
 
 
