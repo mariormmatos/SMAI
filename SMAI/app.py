@@ -94,31 +94,6 @@ def main() -> None:
         px = yf_price_history(ticker, period=period, interval=interval)
         stmts = yf_statements(ticker)
 
-    # --- debug panel (temporary) ---
-    with st.expander("🔍 Debug info (temporário)", expanded=False):
-        import sys
-        st.write(f"Python: {sys.version}")
-        try:
-            import yfinance as _yf
-            st.write(f"yfinance: {_yf.__version__}")
-        except Exception as e:
-            st.write(f"yfinance import error: {e}")
-        try:
-            import curl_cffi
-            st.write(f"curl_cffi: {curl_cffi.__version__}")
-        except Exception as e:
-            st.write(f"curl_cffi: NOT AVAILABLE — {e}")
-        st.write(f"px.empty: {px.empty}, px.shape: {px.shape if not px.empty else 'n/a'}")
-        if not px.empty:
-            st.write(f"px columns: {list(px.columns)}")
-            st.write(f"px Close last: {px['Close'].iloc[-1] if 'Close' in px.columns else 'NO CLOSE COL'}")
-        st.write(f"info keys: {len(info)}")
-        if "_dbg_px_err" in st.session_state:
-            st.error(f"px error: {st.session_state['_dbg_px_err']}")
-        if "_dbg_info_err" in st.session_state:
-            st.error(f"info error: {st.session_state['_dbg_info_err']}")
-    # --- end debug ---
-
     if px.empty:
         st.error("Sem dados de preço para este ticker (ou limite do Yahoo Finance). Confirma o ticker e tenta outro timeframe.")
         st.stop()

@@ -1,13 +1,12 @@
 ﻿from __future__ import annotations
 
-import datetime as dt
 from typing import Dict
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from SMAI.core.data_yf import statement_to_timeseries, yf_news
+from SMAI.core.data_yf import fetch_google_news_rss, statement_to_timeseries
 from SMAI.core.formatting import ensure_date_col, fmt_num, fmt_pct, fmt_ratio, is_bad, safe_float
 from SMAI.ui.charts import plot_area
 from SMAI.ui.components import render_news_bullets
@@ -219,26 +218,13 @@ def render_fundamentals(
 
     with areas[4]:
         st.markdown("### Recent News & Catalysts")
-        st.caption(
-            "Este bloco puxa notícias via yfinance (quando disponível). Para contexto global do mercado, usa o módulo 2."
-        )
+        st.caption("Notícias via Google News.")
 
-        news = yf_news(ticker)
-        if not news:
-            st.info("Sem notícias via Yahoo Finance para este ticker (pode acontecer em alguns tickers).")
+        news_items = fetch_google_news_rss(f"{ticker} stock", limit=12)
+        if not news_items:
+            st.info("Sem notícias disponíveis neste momento.")
         else:
-            items = []
-            for n in news[:12]:
-                ts = n.get("providerPublishTime")
-                published = dt.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d %H:%M UTC") if ts else ""
-                items.append({
-                    "title": n.get("title", ""),
-                    "publisher": n.get("publisher", ""),
-                    "link": n.get("link", ""),
-                    "published": published,
-                    "type": n.get("type", ""),
-                })
-            render_news_bullets(items, title_key="title", link_key="link")
+            render_news_bullets(news_items, title_key="title", link_key="link")
 
         st.markdown("**Catalysts (framework)**")
         st.write(

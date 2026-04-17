@@ -18,8 +18,7 @@ def yf_price_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
         if df is None or df.empty:
             return pd.DataFrame()
         return df
-    except Exception as e:
-        st.session_state["_dbg_px_err"] = repr(e)
+    except Exception:
         return pd.DataFrame()
 
 
@@ -29,10 +28,9 @@ def yf_info(ticker: str) -> Dict:
     result: Dict = {}
     try:
         result = t.info or {}
-    except Exception as e:
-        st.session_state["_dbg_info_err"] = repr(e)
+    except Exception:
+        pass
 
-    # fast_info fills gaps when t.info is empty or missing keys (different endpoint)
     if not result:
         try:
             fi = t.fast_info
@@ -52,10 +50,9 @@ def yf_info(ticker: str) -> Dict:
                 "sharesOutstanding": getattr(fi, "shares", None),
             }
             result = {k: v for k, v in result.items() if v is not None}
-        except Exception as e:
-            st.session_state["_dbg_fast_info_err"] = repr(e)
+        except Exception:
+            pass
 
-    st.session_state["_dbg_info_keys"] = len(result)
     return result
 
 
@@ -80,21 +77,23 @@ def yf_statements(ticker: str) -> Dict[str, pd.DataFrame]:
 
 @st.cache_data(ttl=60 * 30, show_spinner=False)
 def yf_news(ticker: str) -> List[Dict]:
+    """Fetch ticker news — falls back to Google News RSS if Yahoo Finance is blocked."""
     try:
         t = yf.Ticker(ticker)
         news = t.news or []
-        if not isinstance(news, list):
-            return []
-        return news[:30]
+        if news and isinstance(news, list):
+            return news[:30]
     except Exception:
-        return []
+        pass
+    return []
 
 
-@st.cache_data(ttl=60 * 30, show_spinner=False)
-def fetch_yahoo_markets_rss(limit: int = 20) -> List[Dict]:
-    rss_url = "https://finance.yahoo.com/news/rssindex"
+@st.cache_data(ttl=60 * 20, show_spinner=False)
+def fetch_google_news_rss(query: str, limit: int = 20) -> List[Dict]:
+    """Fetch news from Google News RSS — reliable from cloud IPs."""
+    url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}&hl=en-US&gl=US&ceid=US:en"
     try:
-        r = requests.get(rss_url, timeout=10)
+        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         if r.status_code != 200:
             return []
         txt = r.text
@@ -107,20 +106,25 @@ def fetch_yahoo_markets_rss(limit: int = 20) -> List[Dict]:
             continue
         item = chunk.split("</item>")[0]
         title = _extract_tag(item, "title")
-        link = _extract_tag(item, "link")
+        link = _extract_tag(item, "link") or _extract_tag(item, "guid")
         pub = _extract_tag(item, "pubDate")
-        if title or link:
-            items.append({"title": title, "link": link, "published": pub})
+        source = _extract_tag(item, "source")
+        if title:
+            items.append({"title": title, "link": link, "published": pub, "publisher": source})
         if len(items) >= limit:
             break
     return items
 
 
 def _extract_tag(text: str, tag: str) -> str:
-    start = f"<{tag}>"
+    start = f"<{tag}"
     end = f"</{tag}>"
     if start in text and end in text:
-        return _clean_xml(text.split(start)[1].split(end)[0].strip())
+        block = text.split(start)[1]
+        # skip attributes inside the opening tag
+        if ">" in block:
+            block = block.split(">", 1)[1]
+        return _clean_xml(block.split(end)[0].strip())
     return ""
 
 
