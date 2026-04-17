@@ -9,9 +9,9 @@ import pandas as pd
 import streamlit as st
 
 from SMAI.core.dcf import DcfInputs, run_dcf
-from SMAI.core.data_yf import statement_to_timeseries, yf_info, yf_statements
+from SMAI.core.data_yf import statement_to_timeseries, yf_info, yf_price_history, yf_statements
 from SMAI.core.formatting import is_bad, safe_float
-from SMAI.core.scoring import compute_snapshot_ratios, scorecard
+from SMAI.core.scoring import compute_snapshot_ratios, enrich_info_from_stmts, scorecard
 from SMAI.core.sentiment import fetch_reddit_search, fetch_stocktwits, sentiment_summary
 
 
@@ -86,31 +86,26 @@ def _load_universe_from_upload(uploaded) -> List[str]:
 
 def _valuation_screen_row(ticker: str) -> Dict:
     info = yf_info(ticker)
+    stmts = yf_statements(ticker)
+
+    # Get last close from price history as price fallback
+    px = yf_price_history(ticker, "5d", "1d")
+    last_price_px = float(px["Close"].iloc[-1]) if not px.empty and "Close" in px.columns else np.nan
+
+    info = enrich_info_from_stmts(info, stmts, last_price_px)
     ratios = compute_snapshot_ratios(info)
-    mcap_i = safe_float(info.get("marketCap"))
-    last_price = safe_float(info.get("currentPrice"))
-    if is_bad(last_price):
-        last_price = safe_float(info.get("regularMarketPrice"))
 
-    fcf = safe_float(info.get("freeCashflow"))
-    if is_bad(fcf):
-        cf_a = yf_statements(ticker).get("cashflow", pd.DataFrame())
-        cf_ts = statement_to_timeseries(cf_a, ["Total Cash From Operating Activities", "Capital Expenditures"])
-        if (
-            not cf_ts.empty
-            and "Total Cash From Operating Activities" in cf_ts.columns
-            and "Capital Expenditures" in cf_ts.columns
-        ):
-            fcf_series = (cf_ts["Total Cash From Operating Activities"] + cf_ts["Capital Expenditures"]).dropna()
-            if not fcf_series.empty:
-                fcf = safe_float(fcf_series.tail(1).iloc[0])
+    mcap_i = safe_float(info.get("marketCap"), default=None)
+    last_price = safe_float(info.get("currentPrice"), default=None) or safe_float(info.get("regularMarketPrice"), default=None) or (last_price_px if not np.isnan(last_price_px) else None)
 
-    cash = safe_float(info.get("totalCash"))
-    debt = safe_float(info.get("totalDebt"))
-    shares = safe_float(info.get("sharesOutstanding"))
-    net_debt = (debt - cash) if (not is_bad(debt) and not is_bad(cash)) else 0.0
+    fcf = safe_float(info.get("freeCashflow"), default=None)
+
+    cash = safe_float(info.get("totalCash"), default=None)
+    debt = safe_float(info.get("totalDebt"), default=None)
+    shares = safe_float(info.get("sharesOutstanding"), default=None)
+    net_debt = (debt - cash) if (debt is not None and cash is not None) else 0.0
     intrinsic = np.nan
-    if not is_bad(fcf) and fcf > 0 and not is_bad(shares) and shares > 0:
+    if fcf is not None and fcf > 0 and shares is not None and shares > 0:
         dcf_base = DcfInputs(
             years=10,
             fcf_growth=0.08,
@@ -120,20 +115,20 @@ def _valuation_screen_row(ticker: str) -> Dict:
             shares_outstanding=float(shares),
             starting_fcf=float(fcf),
         )
-        intrinsic = safe_float(run_dcf(dcf_base).get("intrinsic_per_share"))
-        if not is_bad(intrinsic) and intrinsic <= 0:
-            intrinsic = np.nan
+        intrinsic = safe_float(run_dcf(dcf_base).get("intrinsic_per_share"), default=None)
+        if intrinsic is not None and intrinsic <= 0:
+            intrinsic = None
 
     upside = np.nan
-    if not is_bad(intrinsic) and not is_bad(last_price) and float(last_price) > 0:
+    if intrinsic is not None and last_price is not None and float(last_price) > 0:
         upside = (float(intrinsic) / float(last_price) - 1.0) * 100.0
 
     score_i, _ = scorecard(ratios)
     return {
         "Ticker": ticker,
-        "Name": info.get("shortName", ""),
-        "Price": np.nan if is_bad(last_price) else float(last_price),
-        "MarketCap($B)": (mcap_i / 1e9) if not is_bad(mcap_i) else np.nan,
+        "Name": info.get("shortName") or info.get("longName") or "",
+        "Price": float(last_price) if last_price is not None else np.nan,
+        "MarketCap($B)": (mcap_i / 1e9) if mcap_i is not None else np.nan,
         "P/E": ratios.get("Trailing P/E", np.nan),
         "P/B": ratios.get("P/B", np.nan),
         "EV/EBITDA": ratios.get("EV/EBITDA", np.nan),
