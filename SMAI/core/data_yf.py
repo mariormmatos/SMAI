@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Dict, List
 
@@ -9,26 +9,10 @@ import yfinance as yf
 
 from .formatting import ensure_date_col
 
-_YF_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
-
-
-def _make_session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update(_YF_HEADERS)
-    return s
-
 
 @st.cache_data(ttl=60 * 20, show_spinner=False)
 def yf_price_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
-    t = yf.Ticker(ticker, session=_make_session())
+    t = yf.Ticker(ticker)
     df = t.history(period=period, interval=interval, auto_adjust=False)
     if df is None or df.empty:
         return pd.DataFrame()
@@ -37,7 +21,7 @@ def yf_price_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
 def yf_info(ticker: str) -> Dict:
-    t = yf.Ticker(ticker, session=_make_session())
+    t = yf.Ticker(ticker)
     try:
         return t.info or {}
     except Exception:
@@ -46,7 +30,7 @@ def yf_info(ticker: str) -> Dict:
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
 def yf_statements(ticker: str) -> Dict[str, pd.DataFrame]:
-    t = yf.Ticker(ticker, session=_make_session())
+    t = yf.Ticker(ticker)
     out: Dict[str, pd.DataFrame] = {}
     for key, attr in [
         ("financials", "financials"),
@@ -66,7 +50,7 @@ def yf_statements(ticker: str) -> Dict[str, pd.DataFrame]:
 @st.cache_data(ttl=60 * 30, show_spinner=False)
 def yf_news(ticker: str) -> List[Dict]:
     try:
-        t = yf.Ticker(ticker, session=_make_session())
+        t = yf.Ticker(ticker)
         news = t.news or []
         if not isinstance(news, list):
             return []
