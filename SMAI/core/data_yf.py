@@ -25,14 +25,38 @@ def yf_price_history(ticker: str, period: str, interval: str) -> pd.DataFrame:
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
 def yf_info(ticker: str) -> Dict:
+    t = yf.Ticker(ticker)
+    result: Dict = {}
     try:
-        t = yf.Ticker(ticker)
         result = t.info or {}
-        st.session_state["_dbg_info_keys"] = len(result)
-        return result
     except Exception as e:
         st.session_state["_dbg_info_err"] = repr(e)
-        return {}
+
+    # fast_info fills gaps when t.info is empty or missing keys (different endpoint)
+    if not result:
+        try:
+            fi = t.fast_info
+            result = {
+                "currency": getattr(fi, "currency", None),
+                "currentPrice": getattr(fi, "lastPrice", None),
+                "previousClose": getattr(fi, "previousClose", None),
+                "regularMarketPreviousClose": getattr(fi, "regularMarketPreviousClose", None),
+                "marketCap": getattr(fi, "marketCap", None),
+                "dayHigh": getattr(fi, "dayHigh", None),
+                "dayLow": getattr(fi, "dayLow", None),
+                "fiftyTwoWeekHigh": getattr(fi, "yearHigh", None),
+                "fiftyTwoWeekLow": getattr(fi, "yearLow", None),
+                "fiftyDayAverage": getattr(fi, "fiftyDayAverage", None),
+                "twoHundredDayAverage": getattr(fi, "twoHundredDayAverage", None),
+                "regularMarketVolume": getattr(fi, "lastVolume", None),
+                "sharesOutstanding": getattr(fi, "shares", None),
+            }
+            result = {k: v for k, v in result.items() if v is not None}
+        except Exception as e:
+            st.session_state["_dbg_fast_info_err"] = repr(e)
+
+    st.session_state["_dbg_info_keys"] = len(result)
+    return result
 
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)

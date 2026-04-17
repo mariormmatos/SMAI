@@ -131,15 +131,19 @@ def main() -> None:
     ratios = compute_snapshot_ratios(info)
     score, score_notes = scorecard(ratios)
 
-    last_price = safe_float(info.get("currentPrice")) or safe_float(info.get("regularMarketPrice")) or last_close
-    prev_close = safe_float(info.get("previousClose"))
+    last_price = (
+        safe_float(info.get("currentPrice"), default=None)
+        or safe_float(info.get("regularMarketPrice"), default=None)
+        or last_close
+    )
+    prev_close = safe_float(info.get("previousClose"), default=None) or safe_float(info.get("regularMarketPreviousClose"), default=None)
     day_change = None
     if last_price is not None and prev_close not in (None, 0):
         day_change = (last_price / prev_close - 1.0) * 100.0
 
-    mcap = safe_float(info.get("marketCap"))
-    pe = safe_float(info.get("trailingPE"))
-    roe = safe_float(info.get("returnOnEquity"))
+    mcap = safe_float(info.get("marketCap"), default=None)
+    pe = safe_float(info.get("trailingPE"), default=None)
+    roe = safe_float(info.get("returnOnEquity"), default=None)
 
     c1, c2, c3, c4, c5 = st.columns([1.2, 1, 1, 1, 1.2])
     with c1:
