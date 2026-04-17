@@ -3,8 +3,95 @@
 from typing import Dict, List, Tuple
 
 import numpy as np
+import pandas as pd
 
 from .formatting import is_bad, safe_float
+
+
+def _stmt_val(df: pd.DataFrame, candidates: List[str]) -> float:
+    """Most recent non-NaN value from a statement DataFrame, trying multiple row names."""
+    if df is None or df.empty:
+        return np.nan
+    for name in candidates:
+        if name in df.index:
+            valid = df.loc[name].dropna()
+            if not valid.empty:
+                return float(valid.iloc[0])
+    return np.nan
+
+
+def enrich_info_from_stmts(info: Dict, stmts: Dict, last_price: float) -> Dict:
+    """Fill missing ratios in info using financial statements (annual)."""
+    result = dict(info)
+
+    fin = stmts.get("financials", pd.DataFrame())
+    bs = stmts.get("balance_sheet", pd.DataFrame())
+    cf = stmts.get("cashflow", pd.DataFrame())
+
+    net_income = _stmt_val(fin, ["Net Income", "Net Income Common Stockholders"])
+    revenue = _stmt_val(fin, ["Total Revenue", "Operating Revenue"])
+    op_income = _stmt_val(fin, ["Operating Income", "EBIT"])
+    ebitda = _stmt_val(fin, ["EBITDA", "Normalized EBITDA"])
+    gross_profit = _stmt_val(fin, ["Gross Profit"])
+    diluted_eps = _stmt_val(fin, ["Diluted EPS", "Basic EPS"])
+    shares = _stmt_val(fin, ["Diluted Average Shares", "Basic Average Shares"])
+
+    equity = _stmt_val(bs, ["Stockholders Equity", "Common Stock Equity", "Total Equity Gross Minority Interest"])
+    total_debt = _stmt_val(bs, ["Total Debt"])
+    total_assets = _stmt_val(bs, ["Total Assets"])
+    cash = _stmt_val(bs, ["Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents"])
+    shares_bs = _stmt_val(bs, ["Ordinary Shares Number", "Share Issued"])
+
+    free_cash_flow = _stmt_val(cf, ["Free Cash Flow"])
+
+    shares_count = shares if not is_bad(shares) else shares_bs
+
+    def _fill(key: str, value: float) -> None:
+        if is_bad(safe_float(result.get(key))) and not is_bad(value):
+            result[key] = value
+
+    # Profitability
+    if not is_bad(equity) and equity != 0 and not is_bad(net_income):
+        _fill("returnOnEquity", net_income / equity)
+    if not is_bad(total_assets) and total_assets != 0 and not is_bad(net_income):
+        _fill("returnOnAssets", net_income / total_assets)
+    if not is_bad(revenue) and revenue != 0:
+        if not is_bad(op_income):
+            _fill("operatingMargins", op_income / revenue)
+        if not is_bad(net_income):
+            _fill("profitMargins", net_income / revenue)
+        if not is_bad(gross_profit):
+            _fill("grossMargins", gross_profit / revenue)
+
+    # Valuation
+    if not is_bad(diluted_eps) and diluted_eps != 0 and not is_bad(last_price):
+        _fill("trailingPE", last_price / diluted_eps)
+    if not is_bad(revenue) and revenue != 0 and not is_bad(shares_count) and not is_bad(last_price):
+        mcap = last_price * shares_count
+        _fill("marketCap", mcap)
+        _fill("priceToSalesTrailing12Months", mcap / revenue)
+    if not is_bad(equity) and equity != 0 and not is_bad(shares_count) and not is_bad(last_price):
+        bvps = equity / shares_count
+        if bvps > 0:
+            _fill("priceToBook", last_price / bvps)
+
+    # Leverage
+    if not is_bad(total_debt) and not is_bad(equity) and equity != 0:
+        _fill("debtToEquity", (total_debt / equity) * 100)
+
+    # EV/EBITDA
+    mcap_val = safe_float(result.get("marketCap"), default=None)
+    if mcap_val is None and not is_bad(shares_count) and not is_bad(last_price):
+        mcap_val = last_price * shares_count
+    if not is_bad(ebitda) and ebitda != 0 and mcap_val is not None:
+        ev = mcap_val + (total_debt if not is_bad(total_debt) else 0) - (cash if not is_bad(cash) else 0)
+        _fill("enterpriseToEbitda", ev / ebitda)
+
+    # Free cash flow
+    if not is_bad(free_cash_flow):
+        _fill("freeCashflow", free_cash_flow)
+
+    return result
 
 
 def _normalize_fraction_metric(value: float, threshold: float = 1.0) -> float:

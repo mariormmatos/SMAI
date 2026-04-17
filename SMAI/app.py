@@ -8,7 +8,7 @@ import streamlit as st
 
 from SMAI.core.data_yf import yf_info, yf_price_history, yf_statements
 from SMAI.core.formatting import fmt_compact, safe_float
-from SMAI.core.scoring import compute_snapshot_ratios, scorecard
+from SMAI.core.scoring import compute_snapshot_ratios, enrich_info_from_stmts, scorecard
 from SMAI.ui.components import kpi_card
 from SMAI.ui.theme import apply_theme
 from SMAI.ui.pages.fundamentals import render_fundamentals
@@ -128,6 +128,7 @@ def main() -> None:
     prev_close = float(px["Close"].iloc[-2]) if len(px) > 1 else last_close
     chg = (last_close / prev_close - 1.0) if prev_close else 0.0
 
+    info = enrich_info_from_stmts(info, stmts, last_close)
     ratios = compute_snapshot_ratios(info)
     score, score_notes = scorecard(ratios)
 
