@@ -103,7 +103,9 @@ def main() -> None:
     prev_close = float(px["Close"].iloc[-2]) if len(px) > 1 else last_close
     chg = (last_close / prev_close - 1.0) if prev_close else 0.0
 
-    info = enrich_info_from_stmts(info, stmts, last_close)
+    _applied = info.get("_fx_applied") or {}
+    _fx = _applied.get("rate") if isinstance(_applied.get("rate"), (int, float)) and _applied.get("rate", 0) > 0 else 1.0
+    info = enrich_info_from_stmts(info, stmts, last_close, fx=_fx)
     ratios = compute_snapshot_ratios(info)
     score, score_notes = scorecard(ratios)
 

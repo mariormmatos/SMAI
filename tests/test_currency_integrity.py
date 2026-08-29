@@ -1,0 +1,207 @@
+"""Regression tests for the data-integrity defects found in the screener.
+
+Reported symptom (2026-08-29): Novo Nordisk showed an EV/EBITDA of 1.7, which
+cannot be true. Measuring the full 67-ticker screener universe turned up four
+defects, three of which corrupted numbers silently.
+
+All figures below were measured against the live yfinance API on 2026-08-29.
+"""
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from SMAI.core.fx import dividend_yield_fraction, normalise_currency
+from SMAI.core.scoring import _ev_to_ebitda, compute_snapshot_ratios, enrich_info_from_stmts, scorecard
+
+
+class TestDividendYield:
+    """20 of 67 tickers displayed a yield roughly 100x too high.
+
+    The old rule divided by 100 only above 1.0, and yfinance reports a percent,
+    so every sub-1% yield passed through untouched and was multiplied by 100
+    downstream: NVDA 0.46% became 44.0%, MSFT 0.71% became 72.0%.
+    """
+
+    def test_derived_from_rate_and_price(self):
+        info = {"dividendRate": 1.00, "currentPrice": 217.55, "dividendYield": 0.44}
+        assert dividend_yield_fraction(info) == pytest.approx(0.0046, abs=1e-4)
+
+    def test_sub_one_percent_yield_is_not_inflated(self):
+        """The exact NVDA case: 0.44 is 0.44%, not 44%."""
+        info = {"dividendRate": 1.00, "currentPrice": 217.55, "dividendYield": 0.44}
+        assert dividend_yield_fraction(info) * 100 < 1.0
+
+    def test_falls_back_to_percent_when_no_rate(self):
+        assert dividend_yield_fraction({"dividendYield": 4.27}) == pytest.approx(0.0427)
+
+    def test_falls_back_to_fraction_when_no_rate_and_value_is_small(self):
+        """XONA.DE returned 0.0298 meaning 2.98% — yfinance is not consistent
+        between tickers, so a blanket divide-by-100 is wrong too."""
+        assert dividend_yield_fraction({"dividendYield": 0.0298}) == pytest.approx(0.0298)
+
+    def test_no_dividend_gives_nan(self):
+        assert np.isnan(dividend_yield_fraction({"dividendYield": None}))
+        assert np.isnan(dividend_yield_fraction({}))
+
+    def test_inflated_yield_no_longer_inflates_the_scorecard(self):
+        """Each of the 20 affected tickers scored +6, and the scorecard is the
+        screener's sort key."""
+        base = {"Trailing P/E": 28.8, "P/S (TTM)": 20.0, "P/B": 27.0, "ROE": 0.30,
+                "Operating Margin": 0.60, "Beta": 2.1}
+        true_yield, _ = scorecard({**base, "Dividend Yield": 0.0046})
+        inflated, _ = scorecard({**base, "Dividend Yield": 0.44})
+        assert inflated - true_yield == 6
+
+
+class TestCurrencyNormalisation:
+    """13 of 67 tickers quoted in one currency and reported in another."""
+
+    @staticmethod
+    def _nvo():
+        # Real NVO figures: USD quote, DKK accounts.
+        return {
+            "currency": "USD",
+            "financialCurrency": "DKK",
+            "marketCap": 201_643_180_032,
+            "ebitda": 175_300_000_000,
+            "totalRevenue": 329_430_990_848,
+            "freeCashflow": 37_673_250_816,
+            "totalCash": 44_982_001_664,
+            "totalDebt": 140_126_994_432,
+            "enterpriseToEbitda": 1.711,
+            "priceToSalesTrailing12Months": 0.612,
+        }
+
+    def test_noop_when_currencies_agree(self):
+        info = {"currency": "USD", "financialCurrency": "USD", "ebitda": 100, "marketCap": 1000}
+        assert normalise_currency(info) == info
+
+    def test_noop_when_currency_unknown(self):
+        info = {"currency": "USD", "ebitda": 100}
+        assert normalise_currency(info) == info
+
+    def test_accounting_figures_move_to_the_quote_currency(self, monkeypatch):
+        import SMAI.core.fx as fx_mod
+
+        monkeypatch.setattr(fx_mod, "fx_rate", lambda a, b: 0.155)
+        out = normalise_currency(self._nvo())
+        assert out["ebitda"] == pytest.approx(175_300_000_000 * 0.155)
+        assert out["freeCashflow"] == pytest.approx(37_673_250_816 * 0.155)
+        assert out["marketCap"] == 201_643_180_032  # already quote currency, untouched
+        assert out["_fx_applied"]["from"] == "DKK"
+        assert out["_fx_applied"]["to"] == "USD"
+
+    def test_ev_ebitda_becomes_plausible(self, monkeypatch):
+        """1.71 was USD enterprise value over DKK EBITDA. The coherent figure,
+        cross-checked against the Copenhagen listing, is about 8."""
+        import SMAI.core.fx as fx_mod
+
+        monkeypatch.setattr(fx_mod, "fx_rate", lambda a, b: 0.155)
+        out = normalise_currency(self._nvo())
+        assert 7.0 < out["enterpriseToEbitda"] < 9.0
+
+    def test_price_to_sales_becomes_plausible(self, monkeypatch):
+        import SMAI.core.fx as fx_mod
+
+        monkeypatch.setattr(fx_mod, "fx_rate", lambda a, b: 0.155)
+        out = normalise_currency(self._nvo())
+        assert 3.5 < out["priceToSalesTrailing12Months"] < 4.5
+
+    def test_enterprise_value_is_rebuilt_not_converted(self, monkeypatch):
+        """yfinance's enterpriseValue is itself a mixed sum — quote-currency
+        market cap plus reporting-currency net debt — so scaling it by an FX
+        rate would not repair it."""
+        import SMAI.core.fx as fx_mod
+
+        monkeypatch.setattr(fx_mod, "fx_rate", lambda a, b: 0.155)
+        out = normalise_currency(self._nvo())
+        expected = out["marketCap"] + (out["totalDebt"] - out["totalCash"])
+        assert out["enterpriseValue"] == pytest.approx(expected)
+
+    def test_mixed_ratios_are_dropped_when_no_rate_available(self, monkeypatch):
+        """Never leave a currency-mixed multiple in place: absent is honest."""
+        import SMAI.core.fx as fx_mod
+
+        monkeypatch.setattr(fx_mod, "fx_rate", lambda a, b: float("nan"))
+        out = normalise_currency(self._nvo())
+        assert out["enterpriseToEbitda"] is None
+        assert out["priceToSalesTrailing12Months"] is None
+        assert "_currency_note" in out
+
+    def test_book_value_is_left_alone(self, monkeypatch):
+        """Verified against the balance sheets: yfinance already converts
+        bookValue to the quote currency (NVO 7.80 is USD, not the 57.99 DKK the
+        accounts imply), so P/B is correct and must not be touched."""
+        import SMAI.core.fx as fx_mod
+
+        monkeypatch.setattr(fx_mod, "fx_rate", lambda a, b: 0.155)
+        info = {**self._nvo(), "bookValue": 7.8033, "priceToBook": 5.8449}
+        out = normalise_currency(info)
+        assert out["bookValue"] == 7.8033
+        assert out["priceToBook"] == 5.8449
+
+
+class TestEvEbitdaCrossCheck:
+    """The old cross-check compared yfinance's enterpriseToEbitda against
+    enterpriseValue/ebitda — both the same vendor figure, so the measured
+    divergence was 0.0% for NVO, BABA and UL and the fallback could never fire.
+    """
+
+    def test_vendor_value_is_kept_when_the_reconstruction_agrees(self):
+        info = {"enterpriseToEbitda": 27.18, "ebitda": 100.0,
+                "marketCap": 2500.0, "totalDebt": 200.0, "totalCash": 100.0}
+        assert _ev_to_ebitda(info) == 27.18  # rebuilt = 26.0, within 35%
+
+    def test_reconstruction_overrules_a_wild_vendor_value(self):
+        info = {"enterpriseToEbitda": 1.71, "ebitda": 100.0,
+                "marketCap": 800.0, "totalDebt": 100.0, "totalCash": 50.0}
+        assert _ev_to_ebitda(info) == pytest.approx(8.5)
+
+    def test_reconstruction_is_independent_of_enterprise_value(self):
+        """enterpriseValue is deliberately absurd; the result must ignore it."""
+        info = {"enterpriseToEbitda": None, "enterpriseValue": 37_000_000_000_000,
+                "ebitda": 100.0, "marketCap": 800.0, "totalDebt": 100.0, "totalCash": 50.0}
+        assert _ev_to_ebitda(info) == pytest.approx(8.5)
+
+
+class TestEnrichRespectsCurrency:
+    def test_statement_ratios_are_converted_before_being_divided_by_price(self):
+        import pandas as pd
+
+        fin = pd.DataFrame({"2025": [10.0, 1000.0]}, index=["Diluted EPS", "Total Revenue"])
+        stmts = {"financials": fin, "balance_sheet": pd.DataFrame(), "cashflow": pd.DataFrame()}
+        # Price 45.61 USD against EPS of 10 DKK is the mixed P/E the old code built.
+        out = enrich_info_from_stmts({}, stmts, last_price=45.61, fx=0.155)
+        assert out["trailingPE"] == pytest.approx(45.61 / (10.0 * 0.155))
+
+    def test_pure_statement_ratios_are_unaffected_by_the_factor(self):
+        """ROE and margins divide one accounting figure by another, so the
+        conversion cancels — a useful invariant to hold the fix to."""
+        import pandas as pd
+
+        fin = pd.DataFrame({"2025": [100.0, 1000.0]}, index=["Net Income", "Total Revenue"])
+        bs = pd.DataFrame({"2025": [500.0]}, index=["Stockholders Equity"])
+        stmts = {"financials": fin, "balance_sheet": bs, "cashflow": pd.DataFrame()}
+        a = enrich_info_from_stmts({}, stmts, last_price=50.0, fx=1.0)
+        b = enrich_info_from_stmts({}, stmts, last_price=50.0, fx=0.155)
+        assert a["returnOnEquity"] == pytest.approx(b["returnOnEquity"])
+        assert a["profitMargins"] == pytest.approx(b["profitMargins"])
+
+
+class TestSnapshotRatiosIntegration:
+    def test_nvo_shaped_payload_produces_sane_ratios(self, monkeypatch):
+        import SMAI.core.fx as fx_mod
+
+        monkeypatch.setattr(fx_mod, "fx_rate", lambda a, b: 0.155)
+        info = normalise_currency({
+            **TestCurrencyNormalisation._nvo(),
+            "currentPrice": 45.61,
+            "dividendRate": 1.77,
+            "trailingPE": 11.12,
+            "priceToBook": 5.84,
+        })
+        r = compute_snapshot_ratios(info)
+        assert 7.0 < r["EV/EBITDA"] < 9.0
+        assert 0.0 < r["Dividend Yield"] < 0.10
+        assert r["Trailing P/E"] == 11.12

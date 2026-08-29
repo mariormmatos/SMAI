@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from .formatting import is_bad, safe_float
+from .fx import dividend_yield_fraction
 
 
 def _stmt_val(df: pd.DataFrame, candidates: List[str]) -> float:
@@ -20,29 +21,44 @@ def _stmt_val(df: pd.DataFrame, candidates: List[str]) -> float:
     return np.nan
 
 
-def enrich_info_from_stmts(info: Dict, stmts: Dict, last_price: float) -> Dict:
-    """Fill missing ratios in info using financial statements (annual)."""
+def enrich_info_from_stmts(info: Dict, stmts: Dict, last_price: float, fx: float = 1.0) -> Dict:
+    """Fill missing ratios in info using financial statements (annual).
+
+    `fx` converts the statements from the reporting currency into the quote
+    currency (`last_price`'s currency). It matters because several ratios below
+    divide a price by a per-share accounting figure: without it, an ADR gets a
+    P/E of price-in-USD over EPS-in-DKK. Pure statement-over-statement ratios
+    (ROE, margins, debt/equity) are unaffected either way — the factor cancels.
+    """
     result = dict(info)
 
     fin = stmts.get("financials", pd.DataFrame())
     bs = stmts.get("balance_sheet", pd.DataFrame())
     cf = stmts.get("cashflow", pd.DataFrame())
 
-    net_income = _stmt_val(fin, ["Net Income", "Net Income Common Stockholders"])
-    revenue = _stmt_val(fin, ["Total Revenue", "Operating Revenue"])
-    op_income = _stmt_val(fin, ["Operating Income", "EBIT"])
-    ebitda = _stmt_val(fin, ["EBITDA", "Normalized EBITDA"])
-    gross_profit = _stmt_val(fin, ["Gross Profit"])
-    diluted_eps = _stmt_val(fin, ["Diluted EPS", "Basic EPS"])
-    shares = _stmt_val(fin, ["Diluted Average Shares", "Basic Average Shares"])
+    if is_bad(safe_float(fx)) or not fx or fx <= 0:
+        fx = 1.0
 
-    equity = _stmt_val(bs, ["Stockholders Equity", "Common Stock Equity", "Total Equity Gross Minority Interest"])
-    total_debt = _stmt_val(bs, ["Total Debt"])
-    total_assets = _stmt_val(bs, ["Total Assets"])
-    cash = _stmt_val(bs, ["Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents"])
-    shares_bs = _stmt_val(bs, ["Ordinary Shares Number", "Share Issued"])
+    def _money(df: pd.DataFrame, candidates: List[str]) -> float:
+        """Statement value converted to the quote currency."""
+        v = _stmt_val(df, candidates)
+        return v if is_bad(v) else v * fx
 
-    free_cash_flow = _stmt_val(cf, ["Free Cash Flow"])
+    net_income = _money(fin, ["Net Income", "Net Income Common Stockholders"])
+    revenue = _money(fin, ["Total Revenue", "Operating Revenue"])
+    op_income = _money(fin, ["Operating Income", "EBIT"])
+    ebitda = _money(fin, ["EBITDA", "Normalized EBITDA"])
+    gross_profit = _money(fin, ["Gross Profit"])
+    diluted_eps = _money(fin, ["Diluted EPS", "Basic EPS"])
+    shares = _stmt_val(fin, ["Diluted Average Shares", "Basic Average Shares"])  # a count, not money
+
+    equity = _money(bs, ["Stockholders Equity", "Common Stock Equity", "Total Equity Gross Minority Interest"])
+    total_debt = _money(bs, ["Total Debt"])
+    total_assets = _money(bs, ["Total Assets"])
+    cash = _money(bs, ["Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents"])
+    shares_bs = _stmt_val(bs, ["Ordinary Shares Number", "Share Issued"])  # a count, not money
+
+    free_cash_flow = _money(cf, ["Free Cash Flow"])
 
     shares_count = shares if not is_bad(shares) else shares_bs
 
@@ -107,23 +123,42 @@ def _normalize_fraction_metric(value: float, threshold: float = 1.0) -> float:
 
 
 def _ev_to_ebitda(info: Dict) -> float:
-    raw_multiple = safe_float(info.get("enterpriseToEbitda"))
-    ev = safe_float(info.get("enterpriseValue"))
-    ebitda = safe_float(info.get("ebitda"))
+    """EV/EBITDA, preferring a value rebuilt from market cap and net debt.
 
-    calc_multiple = np.nan
-    if not is_bad(ev) and not is_bad(ebitda) and ebitda != 0:
-        calc_multiple = ev / ebitda
+    The previous version cross-checked yfinance's `enterpriseToEbitda` against
+    `enterpriseValue / ebitda` and fell back to the latter when they diverged
+    by more than 35%. Measured 2026-08-29: the divergence is 0.0% for NVO, BABA
+    and UL, because both sides are the same yfinance figure — the check was
+    comparing a number with itself and could never fire. It looked like
+    validation while validating nothing.
+
+    Market cap plus net debt over EBITDA is a real independent reconstruction,
+    and after SMAI.core.fx.normalise_currency every input is in the quote
+    currency, so it is also the currency-coherent one.
+    """
+    raw_multiple = safe_float(info.get("enterpriseToEbitda"))
+    ebitda = safe_float(info.get("ebitda"))
+    mcap = safe_float(info.get("marketCap"))
+    cash = safe_float(info.get("totalCash"))
+    debt = safe_float(info.get("totalDebt"))
+
+    rebuilt = np.nan
+    if not is_bad(mcap) and not is_bad(ebitda) and ebitda != 0:
+        net_debt = (0.0 if is_bad(debt) else debt) - (0.0 if is_bad(cash) else cash)
+        rebuilt = (mcap + net_debt) / ebitda
 
     if is_bad(raw_multiple):
-        return calc_multiple
-    if is_bad(calc_multiple):
+        return rebuilt
+    if is_bad(rebuilt):
         return raw_multiple
 
-    if raw_multiple > 0 and calc_multiple > 0:
-        rel_diff = abs(raw_multiple - calc_multiple) / max(abs(raw_multiple), abs(calc_multiple))
+    # Keep the vendor's figure — it accounts for minority interest and
+    # preferred stock, which the reconstruction above does not — but let the
+    # reconstruction overrule it when they genuinely disagree.
+    if raw_multiple > 0 and rebuilt > 0:
+        rel_diff = abs(raw_multiple - rebuilt) / max(abs(raw_multiple), abs(rebuilt))
         if rel_diff > 0.35:
-            return calc_multiple
+            return rebuilt
 
     return raw_multiple
 
@@ -139,7 +174,9 @@ def compute_snapshot_ratios(info: Dict) -> Dict[str, float]:
         "ROA": _normalize_fraction_metric(info.get("returnOnAssets"), threshold=2.0),
         "Profit Margin": _normalize_fraction_metric(info.get("profitMargins"), threshold=2.0),
         "Operating Margin": _normalize_fraction_metric(info.get("operatingMargins"), threshold=2.0),
-        "Dividend Yield": _normalize_fraction_metric(info.get("dividendYield"), threshold=1.0),
+        # Derived from dividendRate/price, not from the ambiguous dividendYield
+        # field — see SMAI.core.fx.dividend_yield_fraction.
+        "Dividend Yield": dividend_yield_fraction(info),
         "Payout Ratio": _normalize_fraction_metric(info.get("payoutRatio"), threshold=2.0),
         "Beta": safe_float(info.get("beta")),
         "Debt/Equity": safe_float(info.get("debtToEquity")),

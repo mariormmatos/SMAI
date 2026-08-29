@@ -8,6 +8,7 @@ import streamlit as st
 import yfinance as yf
 
 from .formatting import ensure_date_col
+from .fx import normalise_currency
 
 
 @st.cache_data(ttl=60 * 20, show_spinner=False)
@@ -53,7 +54,9 @@ def yf_info(ticker: str) -> Dict:
         except Exception:
             pass
 
-    return result
+    # Single choke point: every page reads its fundamentals through here, so
+    # currency normalisation happens once instead of in each caller.
+    return normalise_currency(result)
 
 
 @st.cache_data(ttl=60 * 60, show_spinner=False)
