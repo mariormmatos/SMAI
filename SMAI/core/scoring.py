@@ -8,6 +8,11 @@ import pandas as pd
 from .formatting import is_bad, safe_float
 from .fx import dividend_yield_fraction
 
+# Relative gap above which a vendor multiple is treated as an error rather
+# than imprecision, and replaced by a reconstruction from the statements.
+# Used for both P/B and EV/EBITDA so the two behave consistently.
+MULTIPLE_DIVERGENCE_LIMIT = 0.35
+
 
 def _stmt_val(df: pd.DataFrame, candidates: List[str]) -> float:
     """Most recent non-NaN value from a statement DataFrame, trying multiple row names."""
@@ -54,6 +59,19 @@ def enrich_info_from_stmts(info: Dict, stmts: Dict, last_price: float, fx: float
     fx = safe_float(fx, default=1.0)
     if is_bad(fx) or fx <= 0:
         fx = 1.0
+
+    # Callers derive `last_price` from price history, and the most recent bar
+    # carries a NaN close while a session is still open. Measured 2026-08-29
+    # during market hours: 13 of 13 tickers came in NaN — which silently
+    # disabled EVERY price-based branch below (P/E, P/S, P/B, EV/EBITDA), i.e.
+    # this whole function did nothing whenever the market was open. Falling back
+    # to the quote keeps it working, and is fixed here rather than at the call
+    # sites so no caller has to change.
+    last_price = safe_float(last_price)
+    if is_bad(last_price) or last_price <= 0:
+        last_price = safe_float(result.get("currentPrice"))
+    if is_bad(last_price) or last_price <= 0:
+        last_price = safe_float(result.get("regularMarketPrice"))
 
     def _money(df: pd.DataFrame, candidates: List[str]) -> float:
         """Statement value converted to the quote currency."""
@@ -102,10 +120,33 @@ def enrich_info_from_stmts(info: Dict, stmts: Dict, last_price: float, fx: float
         mcap = last_price * shares_count
         _fill("marketCap", mcap)
         _fill("priceToSalesTrailing12Months", mcap / revenue)
-    if not is_bad(equity) and equity != 0 and not is_bad(shares_count) and not is_bad(last_price):
-        bvps = equity / shares_count
+    # P/B — fill when absent, and overrule a vendor figure that is grossly out.
+    #
+    # yfinance's priceToBook is unreliable on a minority of tickers, and not for
+    # currency reasons: measured 2026-08-29, 11 of ~30 diverged by more than 35%
+    # from the balance sheet, and 8 of those 11 quote and report in the SAME
+    # currency. The worst were ASML at 1423.2 (bookValue came back as 1.19 for a
+    # company with EUR 50.9 of equity per share; the Amsterdam line correctly
+    # says 26.3), Toyota at 15.7 against a real ~1, and Berkshire at 0.0.
+    #
+    # ⚠️ The reconstruction is a GROSS-ERROR DETECTOR, not a more precise number.
+    # It divides the latest ANNUAL equity by a share count, while the vendor may
+    # use a more recent quarter, and the equity line can include minority
+    # interests — on BRK-B it yields 1.0 where the truth is nearer 1.6. Hence the
+    # wide threshold: never displace a vendor value that is merely imprecise.
+    prefer_shares = safe_float(result.get("sharesOutstanding"))
+    pb_shares = prefer_shares if not is_bad(prefer_shares) and prefer_shares > 0 else shares_count
+    if not is_bad(equity) and equity != 0 and not is_bad(pb_shares) and not is_bad(last_price):
+        bvps = equity / pb_shares
         if bvps > 0:
-            _fill("priceToBook", last_price / bvps)
+            rebuilt_pb = last_price / bvps
+            existing_pb = safe_float(result.get("priceToBook"))
+            if is_bad(existing_pb) or existing_pb <= 0:
+                result["priceToBook"] = rebuilt_pb
+            else:
+                divergence = abs(existing_pb - rebuilt_pb) / max(abs(existing_pb), abs(rebuilt_pb))
+                if divergence > MULTIPLE_DIVERGENCE_LIMIT:
+                    result["priceToBook"] = rebuilt_pb
 
     # Leverage
     if not is_bad(total_debt) and not is_bad(equity) and equity != 0:
@@ -173,7 +214,7 @@ def _ev_to_ebitda(info: Dict) -> float:
     # reconstruction overrule it when they genuinely disagree.
     if raw_multiple > 0 and rebuilt > 0:
         rel_diff = abs(raw_multiple - rebuilt) / max(abs(raw_multiple), abs(rebuilt))
-        if rel_diff > 0.35:
+        if rel_diff > MULTIPLE_DIVERGENCE_LIMIT:
             return rebuilt
 
     return raw_multiple
@@ -210,7 +251,12 @@ def scorecard(ratios: Dict[str, float]) -> Tuple[int, List[str]]:
     ps = ratios.get("P/S (TTM)", np.nan)
     pb = ratios.get("P/B", np.nan)
 
-    if not is_bad(pe):
+    # A NEGATIVE multiple means losses (P/E) or negative equity (P/B) — not
+    # cheapness. Unguarded, `pe <= 15` handed a loss-making company the maximum
+    # 18 points: VOD, with a trailing P/E of -83, jumped 18 points the moment
+    # the statement-derived P/E started being computed at all (2026-08-29).
+    # Treated as N/A instead, which is what an unmeasurable multiple is.
+    if not is_bad(pe) and pe > 0:
         if pe <= 15:
             score += 18
             notes.append("Valuation: P/E <= 15 (+18)")
@@ -223,7 +269,7 @@ def scorecard(ratios: Dict[str, float]) -> Tuple[int, List[str]]:
     else:
         notes.append("Valuation: P/E N/A (+0)")
 
-    if not is_bad(ps):
+    if not is_bad(ps) and ps > 0:
         if ps <= 3:
             score += 10
             notes.append("Valuation: P/S <= 3 (+10)")
@@ -236,7 +282,7 @@ def scorecard(ratios: Dict[str, float]) -> Tuple[int, List[str]]:
     else:
         notes.append("Valuation: P/S N/A (+0)")
 
-    if not is_bad(pb):
+    if not is_bad(pb) and pb > 0:
         if pb <= 2:
             score += 6
             notes.append("Balance/Valuation: P/B <= 2 (+6)")

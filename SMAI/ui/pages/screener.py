@@ -90,7 +90,9 @@ def _valuation_screen_row(ticker: str) -> Dict:
 
     # Get last close from price history as price fallback
     px = yf_price_history(ticker, "5d", "1d")
-    last_price_px = float(px["Close"].iloc[-1]) if not px.empty and "Close" in px.columns else np.nan
+    # dropna: the newest bar has a NaN close while a session is open.
+    _closes = px["Close"].dropna() if (not px.empty and "Close" in px.columns) else None
+    last_price_px = float(_closes.iloc[-1]) if _closes is not None and not _closes.empty else np.nan
 
     info = enrich_info_from_stmts(info, stmts, last_price_px)
     ratios = compute_snapshot_ratios(info)

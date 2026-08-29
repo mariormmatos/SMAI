@@ -270,3 +270,101 @@ class TestEntryPointExecutes:
         assert 5.0 < row["EV/EBITDA"] < 12.0          # not the 1.71 of the bug
         assert 0.0 < row["DivYield%"] < 10.0          # not 3.9 -> 390
         assert row["Upside %"] < 100.0                # not +341.9
+
+
+class TestPriceToBook:
+    """yfinance's priceToBook is wrong on a minority of tickers, and NOT for
+    currency reasons: 11 of ~30 diverged >35% from the balance sheet on
+    2026-08-29, and 8 of those quote and report in the same currency.
+    ASML came back at 1423.2, Toyota at 15.7 against a real ~1, BRK-B at 0.0.
+    """
+
+    @staticmethod
+    def _stmts(equity):
+        import pandas as pd
+
+        return {"financials": pd.DataFrame(),
+                "balance_sheet": pd.DataFrame({"2025": [equity]}, index=["Stockholders Equity"]),
+                "cashflow": pd.DataFrame()}
+
+    def test_absurd_vendor_value_is_replaced(self):
+        """The reported ASML case: EUR 19.61B of equity over 384.1M shares is
+        about EUR 51/share, so a bookValue of 1.19 cannot be right."""
+        info = {"priceToBook": 1423.2374, "sharesOutstanding": 384_100_000,
+                "currentPrice": 1696.16,
+                "_fx_applied": {"from": "EUR", "to": "USD", "rate": 1.1587, "fields": []}}
+        out = enrich_info_from_stmts(info, self._stmts(19_612_200_000), 1696.16)
+        assert 25.0 < out["priceToBook"] < 35.0
+
+    def test_zero_vendor_value_is_replaced(self):
+        info = {"priceToBook": 0.0, "sharesOutstanding": 1_000_000_000, "currentPrice": 100.0}
+        out = enrich_info_from_stmts(info, self._stmts(100_000_000_000), 100.0)
+        assert out["priceToBook"] == pytest.approx(1.0)
+
+    def test_plausible_vendor_value_is_kept(self):
+        """The reconstruction is a gross-error detector, not a better number:
+        it uses annual equity and can include minority interests. It must not
+        displace a vendor figure that merely differs a little."""
+        info = {"priceToBook": 5.84, "sharesOutstanding": 1_000_000_000, "currentPrice": 100.0}
+        out = enrich_info_from_stmts(info, self._stmts(20_000_000_000), 100.0)
+        assert out["priceToBook"] == 5.84   # rebuilt = 5.0, within 35%
+
+    def test_equity_is_converted_before_reconstructing(self):
+        info = {"priceToBook": 9999.0, "sharesOutstanding": 100_000_000, "currentPrice": 50.0,
+                "_fx_applied": {"from": "DKK", "to": "USD", "rate": 0.155, "fields": []}}
+        out = enrich_info_from_stmts(info, self._stmts(10_000_000_000), 50.0)
+        assert out["priceToBook"] == pytest.approx(50.0 / (10_000_000_000 * 0.155 / 100_000_000))
+
+
+class TestOpenSessionPrice:
+    """The newest daily bar carries a NaN close while a session is open — 13 of
+    13 tickers on 2026-08-29 — which silently disabled every price-based branch
+    of enrich_info_from_stmts. The whole function did nothing during market
+    hours, and nothing reported it.
+    """
+
+    def test_nan_price_falls_back_to_the_quote(self):
+        import pandas as pd
+
+        stmts = {"financials": pd.DataFrame({"2025": [5.0]}, index=["Diluted EPS"]),
+                 "balance_sheet": pd.DataFrame(), "cashflow": pd.DataFrame()}
+        out = enrich_info_from_stmts({"currentPrice": 100.0}, stmts, float("nan"))
+        assert out["trailingPE"] == pytest.approx(20.0)
+
+    def test_regular_market_price_is_the_second_fallback(self):
+        import pandas as pd
+
+        stmts = {"financials": pd.DataFrame({"2025": [5.0]}, index=["Diluted EPS"]),
+                 "balance_sheet": pd.DataFrame(), "cashflow": pd.DataFrame()}
+        out = enrich_info_from_stmts({"regularMarketPrice": 100.0}, stmts, float("nan"))
+        assert out["trailingPE"] == pytest.approx(20.0)
+
+    def test_a_real_price_is_preferred_over_the_quote(self):
+        import pandas as pd
+
+        stmts = {"financials": pd.DataFrame({"2025": [5.0]}, index=["Diluted EPS"]),
+                 "balance_sheet": pd.DataFrame(), "cashflow": pd.DataFrame()}
+        out = enrich_info_from_stmts({"currentPrice": 999.0}, stmts, 100.0)
+        assert out["trailingPE"] == pytest.approx(20.0)
+
+
+class TestNegativeMultiplesAreNotCheap:
+    """Reviving the statement path exposed this: VOD's trailing P/E of -83 hit
+    the `pe <= 15` band and collected the maximum 18 points. A loss is not a
+    discount.
+    """
+
+    BASE = {"Trailing P/E": 20.0, "P/S (TTM)": 2.0, "P/B": 3.0, "ROE": 0.20,
+            "Operating Margin": 0.30, "Beta": 1.0, "Dividend Yield": 0.02}
+
+    def test_negative_pe_scores_as_unavailable(self):
+        good, _ = scorecard(self.BASE)
+        loss, _ = scorecard({**self.BASE, "Trailing P/E": -83.06})
+        na, _ = scorecard({**self.BASE, "Trailing P/E": float("nan")})
+        assert loss == na < good
+
+    def test_negative_book_value_scores_as_unavailable(self):
+        """BKNG carries negative equity; P/B -14.45 must not read as 'cheap'."""
+        na, _ = scorecard({**self.BASE, "P/B": float("nan")})
+        neg, _ = scorecard({**self.BASE, "P/B": -14.45})
+        assert neg == na

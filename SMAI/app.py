@@ -99,8 +99,10 @@ def main() -> None:
         st.stop()
 
     currency = info.get("currency", "")
-    last_close = float(px["Close"].iloc[-1])
-    prev_close = float(px["Close"].iloc[-2]) if len(px) > 1 else last_close
+    # dropna: the newest bar has a NaN close while a session is open.
+    _closes = px["Close"].dropna()
+    last_close = float(_closes.iloc[-1]) if not _closes.empty else float("nan")
+    prev_close = float(_closes.iloc[-2]) if len(_closes) > 1 else last_close
     chg = (last_close / prev_close - 1.0) if prev_close else 0.0
 
     info = enrich_info_from_stmts(info, stmts, last_close)
