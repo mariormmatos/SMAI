@@ -21,14 +21,26 @@ def _stmt_val(df: pd.DataFrame, candidates: List[str]) -> float:
     return np.nan
 
 
-def enrich_info_from_stmts(info: Dict, stmts: Dict, last_price: float, fx: float = 1.0) -> Dict:
+def enrich_info_from_stmts(info: Dict, stmts: Dict, last_price: float, fx: float | None = None) -> Dict:
     """Fill missing ratios in info using financial statements (annual).
 
-    `fx` converts the statements from the reporting currency into the quote
-    currency (`last_price`'s currency). It matters because several ratios below
-    divide a price by a per-share accounting figure: without it, an ADR gets a
-    P/E of price-in-USD over EPS-in-DKK. Pure statement-over-statement ratios
-    (ROE, margins, debt/equity) are unaffected either way — the factor cancels.
+    The statements are in the reporting currency and `last_price` is in the
+    quote currency, so several ratios below would otherwise divide a price in
+    USD by a per-share figure in DKK. The conversion factor is read from
+    `info["_fx_applied"]`, which SMAI.core.fx.normalise_currency already
+    attached — deliberately NOT from a new required argument.
+
+    That choice is not cosmetic: an earlier version made `fx` a caller-supplied
+    parameter, and on 2026-08-29 that took the deployed app down. Streamlit
+    Cloud re-ran the updated entry script against a still-cached
+    `SMAI.core.scoring` in `sys.modules`, so the new call site met the old
+    signature and raised TypeError before any of it could run. Reading the
+    factor off the payload keeps callers and this function independently
+    upgradable: a stale module now merely skips the conversion instead of
+    crashing.
+
+    Pure statement-over-statement ratios (ROE, margins, debt/equity) are
+    unaffected by the factor either way — it cancels.
     """
     result = dict(info)
 
@@ -36,7 +48,11 @@ def enrich_info_from_stmts(info: Dict, stmts: Dict, last_price: float, fx: float
     bs = stmts.get("balance_sheet", pd.DataFrame())
     cf = stmts.get("cashflow", pd.DataFrame())
 
-    if is_bad(safe_float(fx)) or not fx or fx <= 0:
+    if fx is None:
+        applied = info.get("_fx_applied") or {}
+        fx = applied.get("rate")
+    fx = safe_float(fx, default=1.0)
+    if is_bad(fx) or fx <= 0:
         fx = 1.0
 
     def _money(df: pd.DataFrame, candidates: List[str]) -> float:

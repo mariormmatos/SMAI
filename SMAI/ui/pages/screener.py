@@ -84,13 +84,6 @@ def _load_universe_from_upload(uploaded) -> List[str]:
     return _clean_tokens([text])
 
 
-def _fx_of(info: dict) -> float:
-    """Reporting -> quote currency factor already resolved by yf_info (1.0 if none)."""
-    applied = info.get("_fx_applied") or {}
-    rate = applied.get("rate")
-    return float(rate) if isinstance(rate, (int, float)) and rate > 0 else 1.0
-
-
 def _valuation_screen_row(ticker: str) -> Dict:
     info = yf_info(ticker)
     stmts = yf_statements(ticker)
@@ -99,7 +92,7 @@ def _valuation_screen_row(ticker: str) -> Dict:
     px = yf_price_history(ticker, "5d", "1d")
     last_price_px = float(px["Close"].iloc[-1]) if not px.empty and "Close" in px.columns else np.nan
 
-    info = enrich_info_from_stmts(info, stmts, last_price_px, fx=_fx_of(info))
+    info = enrich_info_from_stmts(info, stmts, last_price_px)
     ratios = compute_snapshot_ratios(info)
 
     mcap_i = safe_float(info.get("marketCap"), default=None)

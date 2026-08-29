@@ -205,3 +205,68 @@ class TestSnapshotRatiosIntegration:
         assert 7.0 < r["EV/EBITDA"] < 9.0
         assert 0.0 < r["Dividend Yield"] < 0.10
         assert r["Trailing P/E"] == 11.12
+
+
+class TestCallSiteStability:
+    """The 2026-08-29 outage: an earlier fix added a required-by-callers `fx`
+    argument, and Streamlit Cloud re-ran the updated app.py against a cached
+    SMAI.core.scoring from sys.modules. The new call site met the old signature
+    and raised TypeError at argument binding, before a single line could run.
+    An import-only smoke test did not catch it — imports succeeded; the call
+    was what failed.
+    """
+
+    def test_works_without_the_fx_argument(self):
+        """Callers must never need to pass fx — that coupling caused the outage."""
+        import pandas as pd
+
+        stmts = {"financials": pd.DataFrame(), "balance_sheet": pd.DataFrame(),
+                 "cashflow": pd.DataFrame()}
+        assert enrich_info_from_stmts({}, stmts, 100.0) == {}
+
+    def test_conversion_factor_is_read_from_the_payload(self):
+        import pandas as pd
+
+        fin = pd.DataFrame({"2025": [10.0]}, index=["Diluted EPS"])
+        stmts = {"financials": fin, "balance_sheet": pd.DataFrame(), "cashflow": pd.DataFrame()}
+        info = {"_fx_applied": {"from": "DKK", "to": "USD", "rate": 0.155, "fields": []}}
+        out = enrich_info_from_stmts(info, stmts, last_price=45.61)
+        assert out["trailingPE"] == pytest.approx(45.61 / (10.0 * 0.155))
+
+    def test_missing_or_broken_fx_metadata_degrades_to_no_conversion(self):
+        import pandas as pd
+
+        fin = pd.DataFrame({"2025": [10.0]}, index=["Diluted EPS"])
+        stmts = {"financials": fin, "balance_sheet": pd.DataFrame(), "cashflow": pd.DataFrame()}
+        for info in ({}, {"_fx_applied": None}, {"_fx_applied": {}},
+                     {"_fx_applied": {"rate": None}}, {"_fx_applied": {"rate": 0}}):
+            out = enrich_info_from_stmts(dict(info), stmts, last_price=45.61)
+            assert out["trailingPE"] == pytest.approx(4.561)
+
+
+class TestEntryPointExecutes:
+    """Import-only checks pass on a broken app. Exercise the real call chain."""
+
+    def test_screener_row_runs_end_to_end(self, monkeypatch):
+        import SMAI.ui.pages.screener as scr
+
+        info = {"currency": "USD", "financialCurrency": "DKK", "shortName": "Novo Nordisk A/S",
+                "currentPrice": 45.61, "marketCap": 201_643_180_032, "ebitda": 27_171_500_000,
+                "totalRevenue": 51_061_803_581, "freeCashflow": 5_839_353_876,
+                "totalCash": 6_972_210_258, "totalDebt": 21_719_684_137,
+                "sharesOutstanding": 3_346_158_124, "dividendRate": 1.77,
+                "trailingPE": 11.12, "priceToBook": 5.84,
+                "_fx_applied": {"from": "DKK", "to": "USD", "rate": 0.155, "fields": []}}
+        import pandas as pd
+
+        monkeypatch.setattr(scr, "yf_info", lambda t: info)
+        monkeypatch.setattr(scr, "yf_statements", lambda t: {
+            "financials": pd.DataFrame(), "balance_sheet": pd.DataFrame(), "cashflow": pd.DataFrame()})
+        monkeypatch.setattr(scr, "yf_price_history",
+                            lambda t, p, i: pd.DataFrame({"Close": [45.61]}))
+
+        row = scr._valuation_screen_row("NVO")
+        assert row["Ticker"] == "NVO"
+        assert 5.0 < row["EV/EBITDA"] < 12.0          # not the 1.71 of the bug
+        assert 0.0 < row["DivYield%"] < 10.0          # not 3.9 -> 390
+        assert row["Upside %"] < 100.0                # not +341.9
