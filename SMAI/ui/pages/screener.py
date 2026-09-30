@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from SMAI.core import peg
 from SMAI.core.dcf import DcfInputs, run_dcf
 from SMAI.core.data_yf import statement_to_timeseries, yf_info, yf_price_history, yf_statements
 from SMAI.core.formatting import is_bad, safe_float
@@ -126,12 +127,17 @@ def _valuation_screen_row(ticker: str) -> Dict:
         upside = (float(intrinsic) / float(last_price) - 1.0) * 100.0
 
     score_i, _ = scorecard(ratios)
+    # PEG with one definition (SMAI/core/peg.py) - informative, not part of the Scorecard.
+    pe_i = ratios.get("Trailing P/E", np.nan)
+    peg_i = peg.peg_for(ticker, None if is_bad(pe_i) else float(pe_i))
     return {
         "Ticker": ticker,
         "Name": info.get("shortName") or info.get("longName") or "",
         "Price": float(last_price) if last_price is not None else np.nan,
         "MarketCap($B)": (mcap_i / 1e9) if mcap_i is not None else np.nan,
         "P/E": ratios.get("Trailing P/E", np.nan),
+        "PEG": peg_i["peg"] if peg_i["peg"] is not None else np.nan,
+        "Fwd PEG": peg_i["forward_peg"] if peg_i["forward_peg"] is not None else np.nan,
         "P/B": ratios.get("P/B", np.nan),
         "EV/EBITDA": ratios.get("EV/EBITDA", np.nan),
         "DivYield%": (ratios.get("Dividend Yield", np.nan) * 100.0) if not is_bad(ratios.get("Dividend Yield", np.nan)) else np.nan,
@@ -238,6 +244,8 @@ def render_screener(
         "Name",
         "MarketCap($B)",
         "P/E",
+        "PEG",
+        "Fwd PEG",
         "P/B",
         "EV/EBITDA",
         "DivYield%",
@@ -259,6 +267,11 @@ def render_screener(
     if len(num_cols) > 0:
         df_display[num_cols] = df_display[num_cols].round(1)
     st.dataframe(df_display, use_container_width=True, hide_index=True)
+    st.caption(
+        "PEG = P/E ÷ crescimento anual do EPS a 5 anos (série da Finnhub). Vazio quando os lucros "
+        "caem ou falta histórico — aí o PEG não existe. Fwd PEG = previsão dos analistas (Finnhub). "
+        "Informativo: não entra no Scorecard."
+    )
 
     st.markdown("### Top picks — with sentiment quick check")
     top = df_sorted[df_sorted["Passes"] == True].head(8)
